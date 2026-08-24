@@ -60,7 +60,7 @@ export function SettingsView({ version }: { version: string }) {
   const { prefs, setPref } = usePreferences();
 
   return (
-    <div className="flex h-dvh w-full flex-col overflow-hidden bg-page">
+    <div className="flex h-app w-full flex-col overflow-hidden bg-page">
       <header className="pt-safe z-30 shrink-0 border-b border-line bg-page">
         <div className="grid h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 px-1.5">
           <Link

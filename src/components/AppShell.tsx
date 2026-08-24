@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { NewProjectDialog } from "@/components/nav/NewProjectDialog";
+import { NewChatDialog } from "@/components/nav/NewChatDialog";
 import { ProjectRail, ProjectRailToggle } from "@/components/nav/ProjectRail";
 import { HeaderMenu } from "@/components/nav/HeaderMenu";
 import { SearchOverlay } from "@/components/nav/SearchOverlay";
@@ -13,13 +14,19 @@ import type { Project } from "@/lib/chat-types";
 /* One column, no sidebar. Switching projects is the rail hanging off the
  * header title; the drawer and the lg-and-up sidebar it mirrored are gone.
  *
- * h-dvh, and deliberately nothing cleverer. Sizing the shell from
- * visualViewport.height looks correct on paper and is wrong on iOS: when the
- * keyboard opens WebKit *pans* the visual viewport to reveal the caret rather
- * than resizing the layout viewport, so shrinking the shell to the visible
- * height leaves it ending mid-pan — the composer lands at the top of the
- * screen with dead space where the thread used to be. Left at h-dvh, the pan
- * does the right thing on its own and puts the composer just above the keys. */
+ * h-app rather than visualViewport.height, and the distinction is the whole
+ * point. When the keyboard opens WebKit *pans* the visual viewport to reveal
+ * the caret rather than resizing the layout viewport, so shrinking the shell
+ * to the visible height leaves it ending mid-pan — the composer lands at the
+ * top of the screen with dead space where the thread used to be. Sized off the
+ * layout viewport, the pan does the right thing on its own and puts the
+ * composer just above the keys.
+ *
+ * It was h-dvh until iOS 26, which overreports the dynamic viewport in an
+ * installed web app: the shell ended taller than the screen, and since it is
+ * also overflow-hidden the composer sat below the bottom edge with no way to
+ * reach it. h-app is that same layout viewport, measured — see globals.css and
+ * the APP_HEIGHT script in layout.tsx. */
 
 export function AppShell({
   projects,
@@ -36,11 +43,12 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [newChatOpen, setNewChatOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-page">
+    <div className="h-app flex w-full overflow-hidden bg-page">
       <RunStatusProvider>
         <AppActionsProvider openSearch={() => setSearchOpen(true)}>
           <div className="flex min-w-0 flex-1 flex-col">
@@ -69,10 +77,15 @@ export function AppShell({
                   />
                 </div>
 
+                {/* New chat, not new project — the rail's "+" tile is where a
+                  * project is made. With nothing open there is no thread to
+                  * restart, so on the empty state it falls back to creating one. */}
                 <button
                   type="button"
-                  aria-label="New project"
-                  onClick={() => setDialogOpen(true)}
+                  aria-label={activeProject ? "New chat" : "New project"}
+                  onClick={() =>
+                    activeProject ? setNewChatOpen(true) : setDialogOpen(true)
+                  }
                   className="tap-target flex size-9 items-center justify-center rounded-control text-ink-2
                   transition-colors duration-100 hover:bg-hover-2 hover:text-ink active:scale-[0.96]"
                 >
@@ -101,6 +114,13 @@ export function AppShell({
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
       />
+      {activeProject && (
+        <NewChatDialog
+          projectId={activeProject.id}
+          open={newChatOpen}
+          onClose={() => setNewChatOpen(false)}
+        />
+      )}
       <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );

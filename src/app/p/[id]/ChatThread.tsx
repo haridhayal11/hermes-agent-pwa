@@ -446,7 +446,7 @@ export function ChatThread({
         <div className="px-safe z-20 mx-auto w-full max-w-3xl shrink-0 pb-1">
           {/* the 2px inset keeps overflow-y-auto from shearing the card's
             * shadow off at the scroll box edge */}
-          <div className="scroll-area max-h-[45vh] overflow-y-auto overscroll-contain p-0.5">
+          <div className="scroll-area max-h-[45dvh] overflow-y-auto overscroll-contain p-0.5">
             {approval ? (
               <ApprovalCard
                 approval={approval}

@@ -8,6 +8,11 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Hermes command center",
     start_url: "/",
     scope: "/",
+    // WebKit's web-app identity key. It costs nothing here — one app, one
+    // scope — but without it iOS has only the URL it was installed from to go
+    // on, and that URL is whatever project happened to be open. See
+    // LaunchNormalizer for the half of this that actually works on iOS.
+    id: "/",
     display: "standalone",
     orientation: "portrait",
     background_color: "#0a0a0a",

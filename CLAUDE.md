@@ -24,8 +24,13 @@ layout reads it from SQLite and hands it down as a prop, which is why it is
 `force-dynamic`.
 
 The organising idea is **one durable chat per project**, not a new chat per
-session. A project is a long-lived thread you return to for weeks. There is no
-"new chat" button, by design.
+session. A project is a long-lived thread you return to for weeks.
+
+The header's pencil is "new chat", and it means the narrow thing: point *this*
+project at a fresh Hermes session, keeping its name, instructions, skills and
+id (`POST /api/projects/[id]/reset`, `NewChatDialog`). It confirms first,
+because it is the one action that discards continuity. A new *project* is the
+rail's `+` tile, and only that.
 
 ```
 iPhone / Mac PWA  (installed, https://<node>.<tailnet>.ts.net)
@@ -85,6 +90,7 @@ Never make the browser talk to `:8642` directly.
 | `src/lib/branding.ts` | `APP_NAME` and `APP_SLUG`. No imports, so either side can read it. |
 | `src/lib/app-settings.ts` | Install-wide settings in SQLite — currently just the agent's name. |
 | `src/components/AgentNameContext.tsx` | The agent's name on the client, seeded from the root layout. |
+| `src/components/LaunchNormalizer.tsx` | Sends a cold launch of the installed app to `/` — iOS pins the icon to whatever URL you installed from. Mounted in the root layout, so `/settings` is covered too. |
 | `src/lib/hermes.ts` | Typed client for `:8642`. The only place `HERMES_API_KEY` is read. |
 | `src/lib/run-manager.ts` | Owns runs, the upstream SSE connection, the event log, the queue, and the push-on-completion hook. Singleton pinned to `globalThis` (HMR would otherwise open a second upstream connection per run). |
 | `src/lib/db.ts` | better-sqlite3 handle + idempotent column migrations. |
@@ -177,6 +183,42 @@ came back as zero. It reports `{sent, failed, error}` now, and
 `POST /api/push/test` answers 502 with the push service's own reason rather
 than a cheerful `{"sent":0}`.
 
+**The shell is sized from the layout viewport, never `dvh` and never
+`visualViewport`.** `--app-height` is written pre-paint by the `APP_HEIGHT`
+script in `layout.tsx` from `window.innerHeight`, and `h-app`
+(`globals.css`) is `var(--app-height, 100dvh)`.
+
+Two different bugs meet here. iOS 26 overreports the dynamic viewport in an
+installed web app, so `h-dvh` made the shell taller than the screen — and since
+it is also `overflow-hidden`, the composer sat below the bottom edge with no
+way to scroll to it. But the obvious correction, sizing off
+`visualViewport.height`, is worse: WebKit *pans* the visual viewport to reveal
+the caret when the keyboard opens rather than resizing the layout viewport, so
+a shell shrunk to the visible height ends mid-pan and the composer lands at the
+top of the screen. `window.innerHeight` is the one measurement that is both
+correct and stable under the keyboard; the guards in the script — never shrink
+while an editable element has focus, never shrink by a keyboard-sized fraction
+— are for the iOS builds that shrink it anyway.
+
+The same iOS 26 release drifts `fixed`/`sticky` boxes off their computed
+position, which is why the composer is plain `relative` — the `sticky bottom-0`
+it used to carry was already a no-op inside a non-scrolling flex column, so it
+bought nothing and cost that. Bottom-anchored overlays (`SearchOverlay`,
+`NewProjectDialog`, `NewChatDialog`) are `inset-x-0 top-0 h-app` rather than
+`fixed inset-0` for the same reason.
+
+**iOS pins the home screen icon to the URL you installed from.** Safari's Add
+to Home Screen ignores the manifest's `start_url`, and `/` redirects into the
+most recent project — so the icon ends up bolted to whichever project was open,
+and 404s if that project is later deleted. `LaunchNormalizer` corrects it on
+the way in: a *cold launch* of the installed app (session-storage marker,
+`navigate` navigation type, `display-mode: standalone`) is replaced with `/`.
+
+The trap is the notification deep link, which is also a cold launch. `sw.js`
+appends `?n=1` in its `openWindow` branch — the branch that runs only when no
+window exists — and the normalizer treats that as "leave it alone" and strips
+the marker. Anything else that opens a window from outside has to do the same.
+
 **Preferences are per device, in `localStorage`.** There is no settings table
 and there deliberately isn't one: theme, text size and how much of a tool call
 to show are properties of the screen in front of you, not of the account. The
@@ -193,7 +235,7 @@ survives intact: NULL means every kind, which is what a subscription created
 before the switches existed has to keep meaning.
 
 `layout.tsx` writes the theme, text size and reduce-motion flags onto `<html>`
-from a blocking inline script, before React. It duplicates
+from a blocking inline script, before React (and `--app-height` alongside it). It duplicates
 `applyPrefsToDocument()` on purpose — a module import runs after first paint,
 and every cold start would flash the wrong palette. Change one, change both.
 
@@ -368,6 +410,12 @@ say the opposite.
   `browser.extension_control.enabled`, which is `false` on this instance and
   scoped to browser control — not a general file transport. The disk split
   stays.
+
+  Two entry points reach that split, and both go through `Composer.attach()`:
+  the paperclip's file input, and pasting an image into the textarea. The paste
+  handler reads `clipboardData.items` and returns *before* `preventDefault()`
+  when there is no image on the clipboard, so a text paste is still a text
+  paste.
 - **`/api/ws` and `/api/pty` are dashboard-only** (port 9119). Over `:8642`,
   SSE is the only push transport.
 

@@ -93,7 +93,7 @@ function NewProjectForm({
   return (
     // Bottom sheet on a phone, centred card on a desktop.
     <div
-      className="px-safe fixed inset-0 z-60 flex items-end justify-center py-3 sm:items-center"
+      className="px-safe h-app fixed inset-x-0 top-0 z-60 flex items-end justify-center py-3 sm:items-center"
       style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}
     >
       <button

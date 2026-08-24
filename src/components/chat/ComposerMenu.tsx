@@ -165,7 +165,7 @@ export function ComposerMenu({
         <span>{mode.kind === "mention" ? "Link a skill" : "Commands"}</span>
       </div>
 
-      <div ref={listRef} className="max-h-[46vh] overflow-y-auto overscroll-contain scroll-area">
+      <div ref={listRef} className="max-h-[46dvh] overflow-y-auto overscroll-contain scroll-area">
         {items.map((item, i) => (
           <div key={item.key}>
             {item.heading && (

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AgentNameProvider } from "@/components/AgentNameContext";
+import { LaunchNormalizer } from "@/components/LaunchNormalizer";
 import { PreferencesProvider } from "@/components/PreferencesContext";
 import { getAgentName } from "@/lib/app-settings";
 import { APP_NAME } from "@/lib/branding";
@@ -52,6 +53,39 @@ d.dataset.textSize=["small","normal","large"].indexOf(p.textSize)>-1?p.textSize:
 if(p.reduceMotion===true||matchMedia("(prefers-reduced-motion: reduce)").matches)d.dataset.reduceMotion="1";
 }catch(e){}})()`;
 
+/* Also pre-paint: the shell's height, measured rather than taken from `dvh`.
+ *
+ * iOS 26 overreports the dynamic viewport in an installed web app, so an
+ * `h-dvh overflow-hidden` shell ended taller than the screen and the composer
+ * sat below the bottom edge with no way to scroll to it. This is the same
+ * family of bug as the fixed/sticky drift that landed with iOS 26.
+ *
+ * window.innerHeight, deliberately, and *not* visualViewport.height — see the
+ * comment in AppShell. WebKit pans the visual viewport to reveal the caret
+ * when the keyboard opens rather than resizing the layout viewport, and the
+ * pan is what puts the composer above the keys. Sizing the shell from the
+ * visual viewport undoes that. The guards are for the iOS builds that shrink
+ * innerHeight for the keyboard anyway: never shrink while an editable element
+ * has focus, and never shrink by a keyboard-sized fraction at all. */
+const APP_HEIGHT = `(function(){try{
+var d=document.documentElement,full=0;
+function set(){
+var h=window.innerHeight;
+if(!h)return;
+if(full&&h<full){
+var a=document.activeElement;
+if(a&&(a.tagName==="TEXTAREA"||a.tagName==="INPUT"||a.isContentEditable))return;
+if(h<full*0.75)return;
+}
+full=h;
+d.style.setProperty("--app-height",h+"px");
+}
+set();
+addEventListener("resize",set);
+addEventListener("pageshow",set);
+addEventListener("orientationchange",function(){full=0;setTimeout(set,120)});
+}catch(e){}})()`;
+
 // themeColor lives here, not in metadata — it's deprecated there in Next 16.
 export const viewport: Viewport = {
   // = the dark --page token, oklch(14.5% 0 0)
@@ -87,9 +121,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} antialiased`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: NO_FLASH }} />
+        <script dangerouslySetInnerHTML={{ __html: `${NO_FLASH};${APP_HEIGHT}` }} />
       </head>
       <body>
+        {/* Every route, not just the shell: /settings is deliberately outside
+          * AppShell and is just as installable as anything else. */}
+        <LaunchNormalizer />
         <PreferencesProvider>
           <AgentNameProvider initial={agentName}>{children}</AgentNameProvider>
         </PreferencesProvider>

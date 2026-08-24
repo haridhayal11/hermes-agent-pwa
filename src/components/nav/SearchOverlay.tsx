@@ -117,7 +117,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
     active && !loading && shown.projects.length === 0 && shown.messages.length === 0;
 
   return (
-    <div className="fixed inset-0 z-60 flex flex-col bg-page">
+    <div className="h-app fixed inset-x-0 top-0 z-60 flex flex-col bg-page">
       <div className="pt-safe shrink-0 border-b border-line bg-page">
         <div className="px-safe flex h-14 items-center gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-control border border-line

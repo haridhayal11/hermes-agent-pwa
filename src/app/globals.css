@@ -425,6 +425,20 @@ html[data-reduce-motion="1"] *::after {
   padding-right: max(12px, env(safe-area-inset-right));
 }
 
+/* ─────────────────────────────────────────────────────────
+ * SHELL HEIGHT
+ * `--app-height` is written pre-paint by the inline script in
+ * layout.tsx from window.innerHeight, and `100dvh` is only the
+ * fallback for the first frame of a browser that hasn't run it.
+ * iOS 26 overreports the dynamic viewport in an installed web
+ * app, which pushed the composer off the bottom edge of a shell
+ * that is also `overflow-hidden` — so there was no way to scroll
+ * to it. Measure it instead.
+ * ───────────────────────────────────────────────────────── */
+@utility h-app {
+  height: var(--app-height, 100dvh);
+}
+
 /* 44px hit area on a control that is drawn smaller. The pseudo-element is
    centred on the button, so it grows symmetrically and never shifts layout. */
 @utility tap-target {
@@ -520,8 +534,8 @@ body {
   /* kerning + real numerals — Geist ships both, and tabular figures matter
      for the elapsed timers that tick in place */
   font-feature-settings: "kern", "liga", "calt";
-  /* the composer is fixed to the bottom edge on iOS; keep rubber-banding
-     from detaching it from the keyboard */
+  /* the composer is the last row of a shell that fills the screen exactly;
+     keep rubber-banding from detaching it from the keyboard */
   overscroll-behavior-y: none;
   /* the grey flash on every tap is the single biggest tell that an installed
      PWA is a web page. Feedback comes from the active: transitions instead. */

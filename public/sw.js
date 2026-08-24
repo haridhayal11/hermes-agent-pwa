@@ -71,7 +71,14 @@ self.addEventListener("notificationclick", (event) => {
           return;
         }
       }
-      if (self.clients.openWindow) await self.clients.openWindow(target);
+      if (self.clients.openWindow) {
+        // No window exists, so this is a cold launch — and a cold launch is
+        // exactly what LaunchNormalizer rewrites to "/" to undo iOS pinning
+        // the icon to a project URL. Mark it so the deep link survives.
+        const url = new URL(target, self.location.origin);
+        url.searchParams.set("n", "1");
+        await self.clients.openWindow(url.href);
+      }
     })(),
   );
 });

@@ -110,7 +110,9 @@ export function Composer({
     uploading === 0 &&
     !disabled;
 
-  async function attach(files: FileList | null) {
+  /* `File[]` as well as `FileList`, because a pasted screenshot arrives as
+   * DataTransferItems rather than as an input's file list. */
+  async function attach(files: FileList | File[] | null) {
     if (!files || files.length === 0) return;
     setUploadError(null);
     setUploading((n) => n + files.length);
@@ -254,7 +256,7 @@ export function Composer({
   };
 
   return (
-    <div className="px-safe pb-safe sticky bottom-0 z-20 shrink-0 bg-page pt-2">
+    <div className="px-safe pb-safe relative z-20 shrink-0 bg-page pt-2">
       {/* the thread ends flush against the bar; fade it into the page colour
        * over the last few pixels rather than cutting it off at a hard edge */}
       <div
@@ -368,6 +370,20 @@ export function Composer({
               syncMenu(el.value, el.selectionStart ?? 0);
             }}
             onBlur={() => setMenu(null)}
+            // A screenshot on the clipboard is the fastest way to show the
+            // agent what you are looking at. Everything past attach() already
+            // handles it — this is only the missing entry point.
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData?.items ?? [])
+                .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+                .map((item) => item.getAsFile())
+                .filter((file): file is File => file !== null);
+              // A text paste has to stay a text paste — bail before
+              // preventDefault(), not after.
+              if (files.length === 0) return;
+              event.preventDefault();
+              void attach(files);
+            }}
             onKeyDown={(event) => {
               if (menuOpen) {
                 if (event.key === "Escape") {
