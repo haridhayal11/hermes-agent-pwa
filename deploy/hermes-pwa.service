@@ -1,0 +1,29 @@
+[Unit]
+Description=Hermes PWA — Hermes command center
+Documentation=https://github.com/haridhayal11/hermes-agent-pwa
+# Hermes runs on the same host; we only ever reach it over loopback.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Set this to the account that owns the install directory. A user unit
+# (systemctl --user) wants this line deleted entirely.
+User=CHANGEME
+WorkingDirectory=/opt/hermes-pwa
+EnvironmentFile=/opt/hermes-pwa/.env.production
+# node_modules/.bin/next is a shell wrapper, not JS — node cannot execute it.
+ExecStart=/usr/bin/env node node_modules/next/dist/bin/next start -p ${PORT}
+Restart=always
+RestartSec=3
+
+# better-sqlite3 writes the state DB under the service user's home.
+NoNewPrivileges=true
+PrivateTmp=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hermes-pwa
+
+[Install]
+WantedBy=multi-user.target

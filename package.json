@@ -1,0 +1,42 @@
+{
+  "name": "hermes-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An installable mobile-first command center for a self-hosted Hermes Agent.",
+  "license": "MIT",
+  "author": "haridhayal11",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haridhayal11/hermes-agent-pwa.git"
+  },
+  "homepage": "https://github.com/haridhayal11/hermes-agent-pwa#readme",
+  "bugs": {
+    "url": "https://github.com/haridhayal11/hermes-agent-pwa/issues"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "next": "16.3.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.2",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@10.18.2"
+}

@@ -1,0 +1,11 @@
+# better-sqlite3 is a native module and pnpm 10 does not run an install
+# script until it is approved by name. Without this, a fresh clone installs
+# cleanly, prints "Ignored build scripts", and then dies at `next build` on a
+# machine whose pnpm store has never built it — which is every machine but the
+# one it was developed on.
+onlyBuiltDependencies:
+  - better-sqlite3
+
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver

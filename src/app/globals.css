@@ -1,0 +1,616 @@
+@import "tailwindcss";
+
+/* Class-based theming — `.dark` on <html>, no prefers-color-scheme switch.
+   The shell defaults to dark; the toggle only ever adds/removes the class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ─────────────────────────────────────────────────────────
+ * SURFACE TOKENS
+ * Names ported from beautifului.dev (MIT) — the lifted
+ * components reference them in inline styles, var(--ink),
+ * var(--line-strong), so both spellings have to exist. The
+ * *values* are HuggingChat's, from chat-ui's
+ * `src/styles/main.css`, which replaces Tailwind's neutrals
+ * with a zero-chroma ramp:
+ *
+ *   50 #fafafa · 100 #f5f5f5 · 200 #e5e5e5 · 300 #d4d4d4
+ *   400 #a3a3a3 · 500 #737373 · 600 #454545 · 700 #2e2e2e
+ *   800 #1a1a1a · 900 #0a0a0a
+ *
+ * Every neutral below is a step off that ramp with chroma
+ * exactly 0 — the old palette carried a blue tint (hue 264)
+ * on every surface, which is what made greys read as slate.
+ *
+ * --green / --orange / --red survive as the only hues in the
+ * app on purpose: they carry meaning (failure, waiting on
+ * approval, the confidence ramp), and nothing else does.
+ * ───────────────────────────────────────────────────────── */
+:root {
+  --page: oklch(98.5% 0 0); /* #fafafa */
+  --canvas: oklch(97% 0 0); /* #f5f5f5 */
+  --surface: oklch(100% 0 0);
+  --inset: oklch(98.5% 0 0);
+  --hover: oklch(97% 0 0);
+  --hover-2: oklch(92.1% 0 0); /* #e5e5e5 */
+  --ink: oklch(21.8% 0 0); /* #1a1a1a */
+  --ink-2: oklch(55.6% 0 0); /* #737373 */
+  --ink-3: oklch(71.5% 0 0); /* #a3a3a3 */
+  --line: oklch(92.1% 0 0); /* #e5e5e5 */
+  --line-strong: oklch(87% 0 0); /* #d4d4d4 */
+  --field: oklch(97% 0 0); /* #f5f5f5 */
+  --stripe: oklch(0% 0 0 / 0.06);
+  --stripe-bg: oklch(97% 0 0);
+  /* The accent is monochrome, which is the whole point of this palette:
+     HuggingChat has no colour of its own anywhere in the chrome. It stays a
+     separate token rather than collapsing into --ink because it means
+     "interactive", and a hue could be reintroduced here alone. */
+  --accent: oklch(30.1% 0 0); /* #2e2e2e */
+  --accent-ink: oklch(21.8% 0 0); /* #1a1a1a */
+  --accent-tint: oklch(0% 0 0 / 0.06);
+  --green: oklch(60.3% 0.155 150.883);
+  --green-tint: oklch(95.8% 0.017 159.118);
+  --orange: oklch(68.9% 0.179 49.902);
+  --orange-tint: oklch(96.4% 0.021 67.581);
+  --red: oklch(62.1% 0.192 23.042);
+  --red-tint: oklch(95.6% 0.017 17.462);
+  --tooltip-bg: oklch(14.5% 0 0); /* #0a0a0a */
+  --tooltip-fg: oklch(97% 0 0);
+  --tooltip-muted: oklch(71.5% 0 0);
+  --tooltip-border: oklch(30.1% 0 0);
+
+  --shadow-hairline: 0 0 0 1px var(--line);
+  --shadow-btn: 0 0 0 1px var(--line-strong), var(--shadow-xs);
+  --shadow-card: 0 0 0 1px var(--line), var(--shadow-sm);
+  --shadow-raised: 0 0 0 1px var(--line), var(--shadow-md);
+  --shadow-overlay: 0 0 0 1px var(--line), var(--shadow-lg);
+  --shadow-inset-field: inset 0 1px 2px oklch(0% 0 0 / 0.12);
+}
+
+/* The default, and the mode the palette was designed in — the screenshot this
+   was matched against is HuggingChat's dark. Note --page is *below* every
+   card: the shell is near-black and surfaces sit on top of it, rather than the
+   old scheme where the page was mid-charcoal and cards barely separated. */
+.dark {
+  --page: oklch(14.5% 0 0); /* #0a0a0a */
+  --canvas: oklch(17.5% 0 0); /* the rail / sheet panel, one step up */
+  --surface: oklch(21.8% 0 0); /* #1a1a1a — cards, the composer bar */
+  --inset: oklch(18.8% 0 0);
+  --hover: oklch(26% 0 0);
+  --hover-2: oklch(30.1% 0 0); /* #2e2e2e */
+  --ink: oklch(92.1% 0 0); /* #e5e5e5 */
+  --ink-2: oklch(71.5% 0 0); /* #a3a3a3 */
+  --ink-3: oklch(55.6% 0 0); /* #737373 */
+  --line: oklch(30.1% 0 0); /* #2e2e2e */
+  --line-strong: oklch(39% 0 0); /* #454545 — the pill-button grey */
+  --field: oklch(26% 0 0); /* user bubbles + chips, a step above --surface */
+  --stripe: oklch(100% 0 0 / 0.05);
+  --stripe-bg: oklch(17.5% 0 0);
+  --accent: oklch(92.1% 0 0); /* #e5e5e5 */
+  --accent-ink: oklch(87% 0 0); /* #d4d4d4 */
+  --accent-tint: oklch(100% 0 0 / 0.12);
+  --green: oklch(70.5% 0.154 153.814);
+  --green-tint: oklch(70.5% 0.154 153.814 / 0.14);
+  --orange: oklch(74.6% 0.156 55.642);
+  --orange-tint: oklch(74.6% 0.156 55.642 / 0.14);
+  --red: oklch(66.6% 0.18 21.433);
+  --red-tint: oklch(66.6% 0.18 21.433 / 0.14);
+  --tooltip-bg: oklch(21.8% 0 0);
+  --tooltip-fg: oklch(92.1% 0 0);
+  --tooltip-muted: oklch(71.5% 0 0);
+  --tooltip-border: oklch(30.1% 0 0);
+
+  /* The hairline rings are deliberately fainter than they were. They are the
+     top edge of every card, and against a #0a0a0a page the old alphas drew a
+     visible white outline where this palette wants a flat panel. The drop
+     shadows are untouched — they still do the separating. */
+  --shadow-hairline: 0 0 0 1px var(--line);
+  --shadow-btn: 0 0 0 1px oklch(100% 0 0 / 0.07), 0 1px 2px oklch(0% 0 0 / 0.3);
+  --shadow-card: 0 0 0 1px oklch(100% 0 0 / 0.08), 0 1px 2px oklch(0% 0 0 / 0.2),
+    0 2px 6px oklch(0% 0 0 / 0.2);
+  --shadow-raised: 0 0 0 1px oklch(100% 0 0 / 0.09), 0 2px 10px oklch(0% 0 0 / 0.22);
+  --shadow-overlay: 0 0 0 1px oklch(100% 0 0 / 0.11), 0 8px 28px oklch(0% 0 0 / 0.34);
+  --shadow-inset-field: inset 0 1px 2px oklch(0% 0 0 / 0.4);
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-inset: var(--inset);
+  --color-hover: var(--hover);
+  --color-hover-2: var(--hover-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-field: var(--field);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-tint: var(--accent-tint);
+  --color-green: var(--green);
+  --color-green-tint: var(--green-tint);
+  --color-orange: var(--orange);
+  --color-orange-tint: var(--orange-tint);
+  --color-red: var(--red);
+  --color-red-tint: var(--red-tint);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@theme {
+  /* Softer than the lifted defaults (6/8/10), to sit with the composer's
+     18px bar and its round buttons rather than against them. */
+  --radius-chip: 8px;
+  --radius-control: 10px;
+  --radius-card: 14px;
+
+  /* ── TYPE SCALE ────────────────────────────────────────
+   * One place to tune density. Every component reads these
+   * instead of one-off text-[12.5px] arbitrary values, so
+   * the whole app moves together. Sizes are px, not rem:
+   * the shell must not resize with the browser root font,
+   * because the composer's 16px is load-bearing (anything
+   * under 16px makes iOS Safari zoom the viewport on focus,
+   * and the viewport never zooms back).
+   * ─────────────────────────────────────────────────────── */
+  --text-micro: 10.5px;
+  --text-micro--line-height: 1.5;
+  --text-meta: 11.5px;
+  --text-meta--line-height: 1.5;
+  --text-label: 12.5px;
+  --text-label--line-height: 1.5;
+  --text-ui: 13.5px;
+  --text-ui--line-height: 1.45;
+  --text-body: 15px;
+  --text-body--line-height: 1.55;
+  --text-input: 16px;
+  --text-input--line-height: 1.4;
+
+  /* touch targets — iOS HIG minimum is 44px, which is larger than any
+     of the visual controls here, so the extra is bought with a
+     transparent ::after rather than by inflating the glyph. */
+  --size-tap: 44px;
+
+  /* elevation primitives the composite shadows above are built from */
+  --shadow-xs: 0 0 4px 0 #0000000a;
+  --shadow-sm: 0 18px 47px 0 #00000008, 0 7.5px 19px 0 #00000005,
+    0 4px 10.5px 0 #00000005, 0 2.3px 5.8px 0 #00000003, 0 1.2px 3.1px 0 #00000003,
+    0 0.5px 1.3px 0 #00000003;
+  --shadow-md: 0 17.54px 23.39px 0 #0000000a, 0 9.4px 12.5px 0 #00000008,
+    0 5.25px 7px 0 #00000005, 0 2.79px 3.72px -2px #00000003, 0 1.16px 1.5px 0 #00000003;
+  --shadow-lg: 0 25px 50px 0 #0000000d, 0 12px 24px 0 #0000000a, 0 6px 12px 0 #00000008,
+    0 3px 6px 0 #00000005, 0 1.5px 3px 0 #00000005;
+
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-link: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* motion scale — transitions.dev _root.css */
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --distance-sm: 4px;
+  --distance-md: 8px;
+  --distance-lg: 16px;
+  --scale-sm: 0.985;
+  --scale-md: 0.95;
+  --blur-subtle: 0.5px;
+
+  --animate-shimmer-text: shimmer-text 1.4s linear infinite;
+  --animate-spin: spin 1s linear infinite;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * KEYFRAMES — deliberately outside @theme.
+ * Tailwind v4 treats @keyframes inside @theme as *theme*
+ * keyframes and only emits the ones an `animate-*` utility
+ * pulls in. Everything here is driven by inline
+ * `style={{ animation: "fade-up ..." }}`, which the scanner
+ * cannot see, so declared in @theme they were all tree-shaken
+ * out and every animation in the app silently did nothing.
+ * At the top level they are plain CSS and always ship.
+ * ───────────────────────────────────────────────────────── */
+@keyframes shimmer-text {
+  0% {
+    background-position: 150%;
+  }
+  100% {
+    background-position: -50%;
+  }
+}
+
+@keyframes fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes spin {
+  100% {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes pixel-on {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  18%,
+  42% {
+    opacity: 1;
+  }
+  62% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-5px);
+  }
+  40% {
+    transform: translateX(5px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes panel-in-right {
+  0% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toast-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────
+ * PREFERENCE-DRIVEN OVERRIDES
+ * Written onto <html> by layout.tsx's pre-paint script and kept
+ * there by applyPrefsToDocument(). These restate the @theme type
+ * scale as a multiple of --font-scale, and must therefore stay
+ * *after* @theme in source order to win.
+ * ───────────────────────────────────────────────────────── */
+:root {
+  --font-scale: 1;
+}
+html[data-text-size="small"] {
+  --font-scale: 0.92;
+}
+html[data-text-size="large"] {
+  --font-scale: 1.14;
+}
+
+:root {
+  --text-micro: calc(10.5px * var(--font-scale));
+  --text-meta: calc(11.5px * var(--font-scale));
+  --text-label: calc(12.5px * var(--font-scale));
+  --text-ui: calc(13.5px * var(--font-scale));
+  --text-body: calc(15px * var(--font-scale));
+  /* clamped, not scaled down: under 16px iOS Safari zooms the viewport on
+     focus and never zooms back, so "small" must not reach the composer. */
+  --text-input: max(16px, calc(16px * var(--font-scale)));
+}
+
+/* Above `sm` there is a pointer and a bigger screen: tighten the reading
+   size, and drop the composer's iOS zoom guard since desktop Safari has no
+   focus-zoom behaviour to defend against. */
+@media (min-width: 640px) {
+  :root {
+    --text-body: calc(14.5px * var(--font-scale));
+    --text-input: calc(13.5px * var(--font-scale));
+  }
+}
+
+/* Reduced motion. Zeroing the duration tokens is enough for every entrance
+   animation in the app, because they are all declared inline as
+   `animation: fade-up var(--duration-medium) …`. The looping status
+   indicators — the tool spinner, the run dot, the streaming shimmer — spell
+   their durations out literally and deliberately survive this: a frozen
+   spinner reads as a hung run, which is worse than the motion. */
+html[data-reduce-motion="1"] {
+  --duration-micro: 0ms;
+  --duration-quick: 0ms;
+  --duration-fast: 0ms;
+  --duration-medium: 0ms;
+  --duration-slow: 0ms;
+}
+html[data-reduce-motion="1"] *,
+html[data-reduce-motion="1"] *::before,
+html[data-reduce-motion="1"] *::after {
+  transition-duration: 0ms !important;
+  transition-delay: 0ms !important;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * SAFE AREAS
+ * Every one of these is a `max()` against a fallback, so the
+ * same markup is correct in a browser tab (insets are 0) and
+ * in the installed PWA with viewport-fit=cover (insets are
+ * the notch / home indicator).
+ * ───────────────────────────────────────────────────────── */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility pb-safe {
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+@utility px-safe {
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
+}
+
+/* 44px hit area on a control that is drawn smaller. The pseudo-element is
+   centred on the button, so it grows symmetrically and never shifts layout. */
+@utility tap-target {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--size-tap));
+    height: max(100%, var(--size-tap));
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* composite elevations — kept out of @theme so `.dark` can redefine them */
+@utility shadow-hairline {
+  box-shadow: var(--shadow-hairline);
+}
+@utility shadow-btn {
+  box-shadow: var(--shadow-btn);
+}
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}
+@utility shadow-raised {
+  box-shadow: var(--shadow-raised);
+}
+@utility shadow-overlay {
+  box-shadow: var(--shadow-overlay);
+}
+@utility shadow-inset-field {
+  box-shadow: var(--shadow-inset-field);
+}
+
+/* card geometry shared by the lifted primitives */
+.primitive-card-pad {
+  padding: 12px;
+}
+.primitive-card-bar,
+.primitive-card-footer {
+  padding: 10px 12px;
+}
+.primitive-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-control);
+}
+
+.animated-underline {
+  display: inline-block;
+  position: relative;
+}
+.animated-underline::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: 0;
+  transition: transform 0.28s var(--ease-link);
+}
+a:hover .animated-underline::after,
+a:focus-visible .animated-underline::after {
+  transform: scaleX(1);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+html {
+  /* iOS inflates text inside wide blocks when the page is rotated or when
+     Larger Text is on. This app is a fixed-density shell — the type scale
+     above is the whole contract, so opt out of the inflation entirely. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* kerning + real numerals — Geist ships both, and tabular figures matter
+     for the elapsed timers that tick in place */
+  font-feature-settings: "kern", "liga", "calt";
+  /* the composer is fixed to the bottom edge on iOS; keep rubber-banding
+     from detaching it from the keyboard */
+  overscroll-behavior-y: none;
+  /* the grey flash on every tap is the single biggest tell that an installed
+     PWA is a web page. Feedback comes from the active: transitions instead. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Chrome is not selectable — a long-press that selects the header title
+   instead of doing nothing reads as broken. Message content opts back in,
+   because copying an answer is a real thing people do. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+[data-selectable],
+[data-selectable] *,
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Native-feeling momentum without the desktop scrollbar gutter. */
+.scroll-area {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  transition: background-color 150ms ease-out;
+}
+.scroll-area:hover::-webkit-scrollbar-thumb {
+  background-color: var(--line-strong);
+}
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* The project rail is scrolled by thumb, and a scrollbar under the tiles
+   reads as chrome rather than as an affordance. The partially-visible tile at
+   the edge is what signals there is more. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Keyboard focus only — a tap on a button should not leave a ring behind.
+   No border-radius here: modern engines already follow the element's own
+   radius, and setting one would square off the round send button.
+
+   Note this beats Tailwind's `outline-none` and always will: utilities live in
+   a cascade layer and unlayered rules win over layered ones whatever their
+   specificity. So opting an element out has to happen here, not in a
+   className. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ...except text fields, which opt out.
+   Per spec they match :focus-visible on a plain click, not just on keyboard
+   focus, so the ring fired every time you tapped into the composer — and a
+   2px accent box drawn around the prompt, inset from the bar's own rounded
+   border and cutting it off from the controls beneath, read as an error
+   state. They lose nothing: a caret appears the moment they take focus, and
+   every one of them already tints its own border (the dialogs) or its
+   container's (the composer's focus-within). Checkboxes and radios are
+   excluded from the exclusion — they have no caret and need the ring. */
+textarea:focus-visible,
+input:not([type="checkbox"]):not([type="radio"]):focus-visible {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
