@@ -64,6 +64,7 @@ rsync -az --delete \
   --exclude '.git' \
   --exclude 'node_modules' \
   --exclude '.next' \
+  --exclude 'android' \
   --exclude '.env*' \
   --exclude '*.db' \
   "$REPO_ROOT/" "$TARGET:$APP_DIR/"

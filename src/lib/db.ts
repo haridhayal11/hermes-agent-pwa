@@ -121,6 +121,47 @@ function openDb(): Database.Database {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    /* Native API clients authenticate independently of the browser UI.
+     *
+     * Access tokens and one-time pairing codes are never stored in plaintext:
+     * only their SHA-256 digests reach SQLite. Pairing codes are created from
+     * the host CLI, expire quickly and are deleted in the same transaction
+     * that creates the device. */
+    CREATE TABLE IF NOT EXISTS api_devices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      revoked_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_devices_active
+      ON api_devices(token_hash) WHERE revoked_at IS NULL;
+
+    CREATE TABLE IF NOT EXISTS api_pairing_codes (
+      id TEXT PRIMARY KEY,
+      code_hash TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_pairing_codes_expiry
+      ON api_pairing_codes(expires_at);
+
+    /* A phone may lose the response to a successful send and retry it. The
+     * reservation row prevents the same user message becoming two runs. */
+    CREATE TABLE IF NOT EXISTS api_idempotency_keys (
+      device_id TEXT NOT NULL REFERENCES api_devices(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      response_status INTEGER,
+      response_body TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (device_id, key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_idempotency_created
+      ON api_idempotency_keys(created_at);
   `);
   migrate(db);
   return db;

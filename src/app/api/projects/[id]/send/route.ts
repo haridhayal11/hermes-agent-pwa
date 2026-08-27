@@ -8,11 +8,17 @@ function parseAttachments(raw: unknown): Attachment[] {
     if (!item || typeof item !== "object") return [];
     const a = item as Record<string, unknown>;
     const name = typeof a.name === "string" ? a.name : "attachment";
+    const size =
+      typeof a.size === "number" && Number.isFinite(a.size) && a.size >= 0
+        ? a.size
+        : undefined;
     if (a.kind === "image" && typeof a.url === "string" && a.url.startsWith("data:image/")) {
-      return [{ kind: "image", name, url: a.url }];
+      const image: Attachment = { kind: "image", name, url: a.url, size };
+      if (typeof a.path === "string" && a.path.startsWith("/")) image.path = a.path;
+      return [image];
     }
     if (a.kind === "file" && typeof a.path === "string" && a.path.startsWith("/")) {
-      return [{ kind: "file", name, path: a.path }];
+      return [{ kind: "file", name, path: a.path, size }];
     }
     return [];
   });

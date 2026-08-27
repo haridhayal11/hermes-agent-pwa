@@ -20,6 +20,14 @@
 # production
 /build
 
+# Android (the native client lives under /android)
+/android/.gradle
+/android/local.properties
+/android/**/build
+/android/.idea
+*.jks
+*.keystore
+
 # misc
 .DS_Store
 *.pem

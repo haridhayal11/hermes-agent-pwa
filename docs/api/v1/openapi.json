@@ -1,0 +1,639 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hermes Native Client API",
+    "version": "1.0.0",
+    "description": "The stable, authenticated API exposed by the Next.js host to native clients. Hermes itself remains loopback-only and this server remains the sole consumer of Hermes run streams."
+  },
+  "servers": [{ "url": "/", "description": "The paired Hermes web host" }],
+  "security": [{ "deviceBearer": [] }],
+  "paths": {
+    "/api/v1/pairing/claim": {
+      "post": {
+        "operationId": "claimPairing",
+        "summary": "Exchange a one-time host code for a device credential",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PairingClaimRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Device paired. The access token is returned once.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PairingClaimResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getCurrentDevice",
+        "summary": "Validate the credential and describe its device",
+        "responses": {
+          "200": {
+            "description": "Current device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["device", "apiVersion"],
+                  "properties": {
+                    "device": { "$ref": "#/components/schemas/Device" },
+                    "apiVersion": { "const": 1 }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "operationId": "revokeCurrentDevice",
+        "summary": "Revoke the current device credential",
+        "responses": {
+          "204": { "description": "Credential revoked" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "operationId": "getStatus",
+        "summary": "Get Hermes connectivity, capabilities, and active runs",
+        "responses": {
+          "200": {
+            "description": "Current host status",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "summary": "List projects",
+        "parameters": [
+          {
+            "name": "archived",
+            "in": "query",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Projects ordered by pin and recent activity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["projects"],
+                  "properties": {
+                    "projects": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Project" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "createProject",
+        "summary": "Create a project and its durable Hermes session",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateProject" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["project"],
+                  "properties": {
+                    "project": { "$ref": "#/components/schemas/Project" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+      "get": {
+        "operationId": "getProject",
+        "summary": "Get a project",
+        "responses": {
+          "200": {
+            "description": "Project and optional upstream message count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["project", "messageCount"],
+                  "properties": {
+                    "project": { "$ref": "#/components/schemas/Project" },
+                    "messageCount": { "type": ["integer", "null"], "minimum": 0 }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "patch": {
+        "operationId": "updateProject",
+        "summary": "Update project metadata used on subsequent runs",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateProject" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["project"],
+                  "properties": {
+                    "project": { "$ref": "#/components/schemas/Project" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteProject",
+        "summary": "Archive or explicitly purge a project",
+        "parameters": [
+          { "name": "purge", "in": "query", "schema": { "type": "boolean", "default": false } },
+          { "name": "session", "in": "query", "description": "With purge=true, also delete the authoritative Hermes conversation.", "schema": { "type": "boolean", "default": false } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archive or purge result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "archived": { "type": "boolean" },
+                    "deleted": { "type": "boolean" },
+                    "sessionDeleted": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}/messages": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+      "get": {
+        "operationId": "listMessages",
+        "summary": "Read the authoritative conversation plus local cron deliveries",
+        "responses": {
+          "200": {
+            "description": "Conversation messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["messages"],
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Message" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "sendMessage",
+        "summary": "Start, steer, or queue a user message",
+        "description": "A successful response is retained for 24 hours under Idempotency-Key. Retrying the same body and key returns it with Idempotency-Replayed: true.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SendMessage" }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Message accepted",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "Present and true when this is a stored response.",
+                "schema": { "type": "boolean" }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SendResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}/events": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+      "get": {
+        "operationId": "streamProjectEvents",
+        "summary": "Replay then follow project events over SSE",
+        "description": "Each run event has an SSE id of runId:sequence. Reconnect with Last-Event-ID or cursor. Sequence numbers are scoped to a run; when the resolved run changes, the server replays it from -1. The stream closes after a terminal run event and clients reconnect with backoff.",
+        "parameters": [
+          { "name": "cursor", "in": "query", "description": "Fallback for clients that cannot set Last-Event-ID.", "schema": { "type": "string", "pattern": "^.+:-?[0-9]+$" } },
+          { "name": "runId", "in": "query", "description": "Explicit run returned by POST messages.", "schema": { "type": "string" } },
+          { "name": "Last-Event-ID", "in": "header", "schema": { "type": "string", "pattern": "^.+:-?[0-9]+$" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE frames. Keepalives are comments and have no id.",
+            "content": {
+              "text/event-stream": {
+                "schema": { "type": "string" },
+                "x-sse-data-schema": { "$ref": "#/components/schemas/StreamEvent" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/uploads": {
+      "post": {
+        "operationId": "uploadAttachment",
+        "summary": "Stage one image or file on the Hermes host",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["projectId", "file"],
+                "properties": {
+                  "projectId": { "type": "string" },
+                  "file": { "type": "string", "format": "binary" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Attachment value to pass in SendMessage",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Attachment" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "413": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/runs/{runId}/approval": {
+      "parameters": [{ "$ref": "#/components/parameters/RunId" }],
+      "post": {
+        "operationId": "respondToApproval",
+        "summary": "Respond to a pending approval",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ApprovalResponse" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/runs/{runId}/stop": {
+      "parameters": [{ "$ref": "#/components/parameters/RunId" }],
+      "post": {
+        "operationId": "stopRun",
+        "summary": "Request cancellation of a run",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "deviceBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "hms_v1 device token"
+      }
+    },
+    "parameters": {
+      "ProjectId": { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } },
+      "RunId": { "name": "runId", "in": "path", "required": true, "schema": { "type": "string" } },
+      "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string", "minLength": 8, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" } }
+    },
+    "responses": {
+      "Error": {
+        "description": "Structured API error",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Ok": {
+        "description": "Action accepted",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["ok"],
+              "properties": { "ok": { "const": true } }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "details": true
+            }
+          }
+        }
+      },
+      "Device": {
+        "type": "object",
+        "required": ["id", "name", "platform", "createdAt", "lastSeenAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "platform": { "const": "android" },
+          "createdAt": { "type": "integer", "description": "Unix epoch milliseconds" },
+          "lastSeenAt": { "type": "integer", "description": "Unix epoch milliseconds" }
+        }
+      },
+      "PairingClaimRequest": {
+        "type": "object",
+        "required": ["code", "deviceName"],
+        "properties": {
+          "code": { "type": "string", "example": "4J8K-W6NP-7Q2M" },
+          "deviceName": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "platform": { "const": "android", "default": "android" }
+        }
+      },
+      "PairingClaimResponse": {
+        "type": "object",
+        "required": ["device", "credentials", "apiVersion"],
+        "properties": {
+          "device": { "$ref": "#/components/schemas/Device" },
+          "credentials": {
+            "type": "object",
+            "required": ["scheme", "accessToken"],
+            "properties": {
+              "scheme": { "const": "Bearer" },
+              "accessToken": { "type": "string", "writeOnly": true }
+            }
+          },
+          "apiVersion": { "const": 1 }
+        }
+      },
+      "ModelSelection": {
+        "type": ["object", "null"],
+        "required": ["model"],
+        "properties": {
+          "model": { "type": "string" },
+          "provider": { "type": ["string", "null"] },
+          "options": { "type": ["object", "null"], "additionalProperties": true }
+        }
+      },
+      "Project": {
+        "type": "object",
+        "required": ["id", "name", "emoji", "color", "workingDirectory", "instructions", "pinned", "skills", "modelSelection", "sessionId", "createdAt", "lastActiveAt", "archived"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "emoji": { "type": ["string", "null"] },
+          "color": { "type": ["string", "null"] },
+          "workingDirectory": { "type": ["string", "null"] },
+          "instructions": { "type": ["string", "null"] },
+          "pinned": { "type": "boolean" },
+          "skills": { "type": "array", "items": { "type": "string" } },
+          "modelSelection": { "$ref": "#/components/schemas/ModelSelection" },
+          "sessionId": { "type": "string" },
+          "createdAt": { "type": "integer" },
+          "lastActiveAt": { "type": "integer" },
+          "archived": { "type": "boolean" }
+        }
+      },
+      "CreateProject": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "emoji": { "type": ["string", "null"] },
+          "color": { "type": ["string", "null"] },
+          "workingDirectory": { "type": ["string", "null"] },
+          "instructions": { "type": ["string", "null"] },
+          "pinned": { "type": "boolean" },
+          "skills": { "type": "array", "items": { "type": "string" } },
+          "template": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "UpdateProject": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "emoji": { "type": ["string", "null"] },
+          "color": { "type": ["string", "null"] },
+          "workingDirectory": { "type": ["string", "null"] },
+          "instructions": { "type": ["string", "null"] },
+          "pinned": { "type": "boolean" },
+          "archived": { "type": "boolean" },
+          "skills": { "type": "array", "items": { "type": "string" } },
+          "modelSelection": { "$ref": "#/components/schemas/ModelSelection" }
+        },
+        "additionalProperties": false
+      },
+      "Message": {
+        "type": "object",
+        "required": ["role"],
+        "properties": {
+          "id": { "type": "string" },
+          "role": { "enum": ["user", "assistant", "system", "cron", "tool"] },
+          "content": { "type": ["string", "null"] },
+          "timestamp": { "type": ["string", "number", "null"] },
+          "cron": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": true
+      },
+      "Attachment": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["kind", "name", "path", "size"],
+            "properties": {
+              "kind": { "const": "file" },
+              "name": { "type": "string" },
+              "path": { "type": "string" },
+              "size": { "type": "integer" }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "name", "url", "path", "size"],
+            "properties": {
+              "kind": { "const": "image" },
+              "name": { "type": "string" },
+              "url": { "type": "string", "contentEncoding": "base64" },
+              "path": { "type": "string" },
+              "size": { "type": "integer" }
+            }
+          }
+        ]
+      },
+      "SendMessage": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/Attachment" } },
+          "prefer": { "enum": ["steer", "queue"] }
+        },
+        "anyOf": [{ "required": ["text"] }, { "required": ["attachments"] }]
+      },
+      "SendResult": {
+        "type": "object",
+        "required": ["queued", "mode", "runId"],
+        "properties": {
+          "queued": { "type": "boolean" },
+          "mode": { "enum": ["started", "steered", "queued"] },
+          "runId": { "type": "string" }
+        }
+      },
+      "ApprovalResponse": {
+        "type": "object",
+        "required": ["choice"],
+        "properties": {
+          "choice": { "enum": ["once", "session", "always", "deny"] },
+          "all": { "type": "boolean", "default": false }
+        }
+      },
+      "StreamEvent": {
+        "type": "object",
+        "required": ["type", "runId", "sequence", "occurredAt", "payload"],
+        "properties": {
+          "type": { "type": "string", "description": "message.delta, tool.started, tool.completed, reasoning.available, subagent.start, subagent.complete, approval.request, approval.responded, run.steered, run.stopping, run.completed, run.failed, run.cancelled, or a project event" },
+          "runId": { "type": ["string", "null"] },
+          "sequence": { "type": ["integer", "null"] },
+          "occurredAt": { "type": "integer", "description": "Unix epoch milliseconds" },
+          "payload": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "required": ["hermes", "active_runs"],
+        "properties": {
+          "hermes": {
+            "type": "object",
+            "required": ["reachable", "health", "capabilities", "error"],
+            "properties": {
+              "reachable": { "type": "boolean" },
+              "health": { "type": ["object", "null"], "additionalProperties": true },
+              "capabilities": { "type": ["object", "null"], "additionalProperties": true },
+              "error": { "type": ["string", "null"] }
+            }
+          },
+          "active_runs": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+        }
+      }
+    }
+  }
+}

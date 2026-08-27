@@ -12,11 +12,19 @@ by design.
 
 ```
 iPhone / Mac PWA  (installed, https://<node>.<tailnet>.ts.net)
-      ↓ tailnet-only HTTPS
+Android client     (native Kotlin/Compose, paired per device)
+      ↓ tailnet-only HTTPS; browser API or authenticated /api/v1
 Next.js app on the Hermes node  ← UI + route handlers + SQLite
       ↓ localhost, Bearer API_SERVER_KEY
 Hermes API server :8642
 ```
+
+The native Android client is being developed in [`android/`](android/README.md).
+Its stable server contract is
+[`docs/api/v1/openapi.json`](docs/api/v1/openapi.json): one-time host pairing,
+per-device bearer credentials, idempotent sends, and replayable SSE with a
+run-scoped cursor. The Android app remains a client; Node, SQLite, and Hermes
+continue running on the host.
 
 ## Install it with your agent
 
@@ -87,6 +95,14 @@ push notifications can exist.
 pnpm install
 cp .env.example .env.local     # fill in HERMES_API_KEY at minimum
 pnpm dev
+```
+
+To pair a native client with a development or deployed host:
+
+```bash
+pnpm device pair              # one-time code, ten-minute lifetime
+pnpm device list
+pnpm device revoke --id dev_...
 ```
 
 ```bash

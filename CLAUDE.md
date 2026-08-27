@@ -93,6 +93,10 @@ Never make the browser talk to `:8642` directly.
 | `src/components/LaunchNormalizer.tsx` | Sends a cold launch of the installed app to `/` — iOS pins the icon to whatever URL you installed from. Mounted in the root layout, so `/settings` is covered too. |
 | `src/lib/hermes.ts` | Typed client for `:8642`. The only place `HERMES_API_KEY` is read. |
 | `src/lib/run-manager.ts` | Owns runs, the upstream SSE connection, the event log, the queue, and the push-on-completion hook. Singleton pinned to `globalThis` (HMR would otherwise open a second upstream connection per run). |
+| `src/lib/api/v1/**` | Stable native-client boundary: device auth, public DTOs and idempotent writes. |
+| `src/app/api/v1/**` | Versioned, bearer-authenticated routes for native clients. Pairing claim is the only public exception. |
+| `docs/api/v1/openapi.json` | Source of truth for the native HTTP and SSE contract. |
+| `android/` | Fully native client; never a place to embed the host stack. |
 | `src/lib/db.ts` | better-sqlite3 handle + idempotent column migrations. |
 | `src/lib/instructions.ts` | Composes the per-run system prompt; project templates. |
 | `src/lib/preferences.ts` | Per-device display prefs and their `localStorage` shape. |
@@ -108,6 +112,23 @@ Never make the browser talk to `:8642` directly.
 | `public/sw.js` | Service worker. Push only — no fetch handler, no precache. |
 
 ## Key invariants
+
+**The native client never receives `HERMES_API_KEY`.** A host-issued one-time
+code is exchanged for a per-device token under `/api/v1`; only its digest is
+stored in SQLite. The unversioned browser routes retain the tailnet trust
+model, while every v1 route except pairing claim requires device auth. Change
+the implementation behind v1 freely, but keep its OpenAPI contract stable or
+publish a new version.
+
+**An event cursor is `(run id, sequence)`, never a sequence alone.** `seq`
+starts over for every run. Native SSE ids use `<runId>:<seq>` and accept either
+`Last-Event-ID` or `?cursor=` on reconnect. Applying the last sequence from one
+run to the next silently drops the next run's opening events.
+
+**Native actions are idempotent.** Project creation, messages, approvals and
+stops require an `Idempotency-Key`; a successful JSON response is retained for
+24 hours per device. A phone losing the response during a network handoff must
+retry the same body and key rather than creating a second run or action.
 
 **Zero-argument GET route handlers must export `dynamic = "force-dynamic"`.**
 Next 16 prerenders a GET handler that never touches the request and serves the

@@ -256,6 +256,19 @@ Then one real round trip, which is the only check that exercises the streaming
 path: open the URL, create a project, send a message, and confirm tokens stream
 in and the run settles.
 
+If a native Android client is being paired, generate its single-use code on
+this host after the service is running:
+
+```bash
+cd <install-dir>
+pnpm device pair
+```
+
+The command reads the same `DB_PATH` from `.env.production`, prints one code,
+and expires it after ten minutes. Give the client the tailnet HTTPS URL and
+that code. Use `pnpm device list` to audit paired devices and
+`pnpm device revoke --id dev_...` to revoke one from the host.
+
 ## Step 7 — Hand off
 
 Three things you cannot do for them.
