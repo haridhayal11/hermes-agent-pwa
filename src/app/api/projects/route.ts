@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
 import { PROJECT_TEMPLATES } from "@/lib/instructions";
 import { createProjectSession, hermesErrorResponse } from "@/lib/project-session";
+import { publishChange } from "@/lib/api-changes";
+import { registerInitialSession } from "@/lib/project-sessions";
 
 // Live proxy: never cached. Without this Next prerenders a zero-argument
 // GET handler at build time and serves the snapshot forever.
@@ -69,6 +71,8 @@ export async function POST(request: Request) {
     `INSERT INTO projects (id, name, emoji, color, cwd, instructions, pinned, skills, session_id, created_at, last_active_at, archived)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
   ).run(id, name, emoji, color, cwd, instructions, pinned, skills.length ? JSON.stringify(skills) : null, sessionId, now, now);
+  registerInitialSession(id, sessionId, name, now);
+  publishChange("project.changed", { projectId: id });
 
   const project = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id);
   return Response.json({ project }, { status: 201 });

@@ -90,20 +90,25 @@ function ProjectSettingsForm({
     }
   }
 
-  /** Points the project at a brand-new Hermes session. The project keeps its
-   *  id, name, instructions and skills — only the transcript starts over. */
+  /** Adds a new root session while preserving the current one in the tree. */
   async function reset() {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${project.id}/reset`, { method: "POST" });
+      const res = await fetch(`/api/projects/${project.id}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "New chat" }),
+      });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         // 409 while a run is active — the route refuses rather than orphan it
         throw new Error(body.error || `${res.status}`);
       }
+      const body = (await res.json()) as { session: { id: string } };
       onClose();
+      router.push(`/p/${project.id}/s/${body.session.id}`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start a new thread");
@@ -111,8 +116,7 @@ function ProjectSettingsForm({
     }
   }
 
-  /** Branch: a Hermes session fork plus a new local project pointed at it, so
-   *  a side quest gets its own thread without the parent losing its own. */
+  /** Branch the project's currently selected session below the same project. */
   async function branch() {
     if (busy) return;
     setBusy(true);
@@ -123,9 +127,9 @@ function ProjectSettingsForm({
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error || `${res.status}`);
       }
-      const body = (await res.json()) as { project: { id: string } };
+      const body = (await res.json()) as { session: { id: string } };
       onClose();
-      router.push(`/p/${body.project.id}`);
+      router.push(`/p/${project.id}/s/${body.session.id}`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to branch");
@@ -165,7 +169,6 @@ function ProjectSettingsForm({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // renaming mirrors into Hermes' session title, so it can fail
           name: name.trim() || project.name,
           emoji: emoji.trim() || null,
           instructions: instructions.trim() || null,
@@ -301,7 +304,7 @@ function ProjectSettingsForm({
               transition-colors duration-100 enabled:hover:bg-hover enabled:hover:text-ink
               disabled:opacity-50"
           >
-            Branch into a new project
+            Branch this session
           </button>
         )}
         {!confirmReset ? (
@@ -320,9 +323,8 @@ function ProjectSettingsForm({
           >
             <p className="text-label font-medium text-ink">Start a fresh thread?</p>
             <p className="mt-1 text-meta leading-snug text-ink-2">
-              The project keeps its name, instructions and skills, and points at a
-              new Hermes conversation. The old transcript stays reachable from the
-              CLI. Not possible while a run is active.
+              The project keeps its name, instructions and skills. The current
+              conversation stays in the sidebar and the new chat opens beside it.
             </p>
             <div className="mt-2.5 flex items-center gap-2">
               <button

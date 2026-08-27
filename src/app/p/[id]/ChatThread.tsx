@@ -36,7 +36,7 @@ import { useStatus } from "@/hooks/useStatus";
 import { useModels } from "@/hooks/useModels";
 import { IconChevronDown, IconRetry } from "@/components/primitives/icons";
 import type { SlashCommand } from "@/lib/commands";
-import type { Project, ThreadMessage } from "@/lib/chat-types";
+import type { Project, ProjectSession, ThreadMessage } from "@/lib/chat-types";
 
 /** The column is JSON; a corrupt value must not take the thread down with it. */
 function parseModelOptions(raw: string | null): ModelOptions {
@@ -50,13 +50,15 @@ function parseModelOptions(raw: string | null): ModelOptions {
 
 export function ChatThread({
   project,
+  session,
   initialMessages,
 }: {
   project: Project;
+  session: ProjectSession;
   initialMessages: ThreadMessage[];
 }) {
   const projectId = project.id;
-  const thread = useThread(projectId, initialMessages);
+  const thread = useThread(projectId, session.session_id, initialMessages);
   const {
     messages,
     streaming,
@@ -219,17 +221,18 @@ export function ChatThread({
           await retry();
           return;
         case "new": {
-          const res = await fetch(`/api/projects/${projectId}/reset`, {
+          const res = await fetch(`/api/projects/${projectId}/sessions`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: rest || undefined }),
+            body: JSON.stringify({ title: rest || "New chat" }),
           });
           if (!res.ok) {
             const body = (await res.json().catch(() => ({}))) as { error?: string };
             raiseError(body.error ?? "Could not start a new session");
             return;
           }
-          router.refresh();
+          const body = (await res.json()) as { session: { id: string } };
+          router.push(`/p/${projectId}/s/${body.session.id}`);
           return;
         }
         case "title": {
@@ -248,18 +251,21 @@ export function ChatThread({
           return;
         }
         case "branch": {
-          const res = await fetch(`/api/projects/${projectId}/fork`, {
+          const res = await fetch(
+            `/api/projects/${projectId}/sessions/${session.session_id}/fork`,
+            {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: rest || undefined }),
-          });
+            body: JSON.stringify({ title: rest || undefined }),
+            },
+          );
           if (!res.ok) {
             const body = (await res.json().catch(() => ({}))) as { error?: string };
             raiseError(body.error ?? "Could not branch this project");
             return;
           }
-          const body = (await res.json()) as { project: { id: string } };
-          router.push(`/p/${body.project.id}`);
+          const body = (await res.json()) as { session: { id: string } };
+          router.push(`/p/${projectId}/s/${body.session.id}`);
           return;
         }
         // steer and queue never reach here — the composer turns them straight
@@ -269,7 +275,7 @@ export function ChatThread({
           return;
       }
     },
-    [openSearch, projectId, raiseError, retry, router, stop],
+    [openSearch, projectId, raiseError, retry, router, session.session_id, stop],
   );
 
   // Tool calls happen *before* the reply they produce, but the reply only

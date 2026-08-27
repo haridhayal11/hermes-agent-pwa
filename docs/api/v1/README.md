@@ -29,11 +29,23 @@ changes. The stream closes after a terminal event. Clients should refresh
 messages, then reconnect with capped exponential backoff to discover a queued
 run.
 
-Native creates, sends, approvals, and stops require an `Idempotency-Key`.
+Every native state-changing request requires an `Idempotency-Key`.
 Generate a new UUID for each user action and retain it until a response is
 received. Reusing the same key and body within 24 hours returns the original
-successful response; reusing it for a different body is a conflict. PATCH is
-already state-setting and does not require a key.
+successful response; reusing it for a different body is a conflict. Multipart
+uploads additionally require `X-Content-SHA256`; the server verifies the bytes
+and combines the digest with stable file metadata for replay protection.
+
+Project sessions have their own replay stream at
+`/projects/{projectId}/sessions/{sessionId}/events`. The project resource's
+`activeSessionId` is a shared pointer used by Android, the PWA, and scheduled
+job delivery. An offline prompt always remains pinned to the session in its
+URL and must not change that pointer while draining.
+
+`GET /api/v1/changes` is a second SSE stream for resource invalidation. Its
+integer cursor is unrelated to `<runId>:<sequence>`. If the retained window no
+longer contains a requested cursor, the server sends `sync.reset`; refetch
+project/session/job/settings snapshots before recording the new cursor.
 
 ## Pairing from a checkout
 

@@ -18,14 +18,20 @@ function parseCursor(value: string | null): StreamCursor | null {
   return { runId, sequence };
 }
 
-function resolveRunId(projectId: string, explicit: string | null): string | null {
+function resolveRunId(
+  projectId: string,
+  explicit: string | null,
+  sessionId?: string,
+): string | null {
   if (explicit) {
     const run = runManager.getRun(explicit);
-    return run?.project_id === projectId ? explicit : null;
+    return run?.project_id === projectId && (!sessionId || run.session_id === sessionId)
+      ? explicit
+      : null;
   }
   return (
-    runManager.getActiveRun(projectId)?.run_id ??
-    runManager.getLatestRun(projectId)?.run_id ??
+    runManager.getActiveRun(projectId, sessionId)?.run_id ??
+    runManager.getLatestRun(projectId, sessionId)?.run_id ??
     null
   );
 }
@@ -100,8 +106,17 @@ export async function GET(
   request: Request,
   ctx: RouteContext<"/api/v1/projects/[id]/events">,
 ) {
+  const { id } = await ctx.params;
+  const sessionId = new URL(request.url).searchParams.get("sessionId") ?? undefined;
+  return streamVersionedEvents(request, id, sessionId);
+}
+
+async function streamVersionedEvents(
+  request: Request,
+  projectId: string,
+  sessionId?: string,
+) {
   return withDevice(request, async () => {
-    const { id: projectId } = await ctx.params;
     if (!runManager.getProject(projectId)) {
       return error(404, "not_found", "Project not found.");
     }
@@ -111,7 +126,7 @@ export async function GET(
       url.searchParams.get("cursor") ?? request.headers.get("last-event-id"),
     );
     const explicitRunId = url.searchParams.get("runId");
-    const runId = resolveRunId(projectId, explicitRunId);
+    const runId = resolveRunId(projectId, explicitRunId, sessionId);
     if (explicitRunId && !runId) {
       return error(404, "not_found", "Run not found in this project.");
     }

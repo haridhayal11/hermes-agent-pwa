@@ -1,6 +1,7 @@
 import { hermes } from "@/lib/hermes";
 import { JOB_ID_RE, jobErrorResponse } from "@/lib/job-errors";
 import { getBinding } from "@/lib/cron-watcher";
+import { publishChange } from "@/lib/api-changes";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export async function POST(
     // there is no result to return and nothing to await. The watcher picks the
     // output up like any other fire.
     const { job } = await hermes.jobs.runNow(jobId);
+    publishChange("job.changed", { jobId });
     return Response.json({ job: { ...job, binding: getBinding(jobId) ?? null } });
   } catch (err) {
     return jobErrorResponse(err);

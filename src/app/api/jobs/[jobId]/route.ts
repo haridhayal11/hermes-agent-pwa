@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { hermes, type UpdateJobParams } from "@/lib/hermes";
 import { JOB_ID_RE, jobErrorResponse } from "@/lib/job-errors";
 import { clearBinding, fireKey, getBinding, setBinding } from "@/lib/cron-watcher";
+import { publishChange } from "@/lib/api-changes";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/jobs/[jobId]">)
   if (!JOB_ID_RE.test(jobId)) return badId();
   try {
     const { job } = await hermes.jobs.get(jobId);
+    publishChange("job.changed", { jobId });
     return Response.json({ job: { ...job, binding: getBinding(jobId) ?? null } });
   } catch (err) {
     return jobErrorResponse(err);
@@ -92,6 +94,7 @@ export async function DELETE(_req: Request, ctx: RouteContext<"/api/jobs/[jobId]
     // cron_deliveries are deliberately left alone — they are already part of
     // the thread, and deleting the schedule is not deleting the history.
     clearBinding(jobId);
+    publishChange("job.deleted", { jobId });
     return Response.json({ ok: true });
   } catch (err) {
     return jobErrorResponse(err);

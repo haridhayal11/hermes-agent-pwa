@@ -13,6 +13,7 @@ import { composeInstructions, parseSkills } from "./instructions";
 import { outboxDirFor } from "./uploads";
 import { RECOMMEND_FENCE, type Attachment } from "./chat-types";
 import { sendToAll, type PushKind } from "./push";
+import { autoNameSession, getProjectSession } from "./project-sessions";
 
 // api_server.py's /v1/runs event vocabulary (gateway/platforms/api_server.py,
 // _handle_runs / _run_and_close). "run.cancelled" only fires via /stop.
@@ -176,11 +177,26 @@ class RunManager extends EventEmitter {
       .get(projectId) as ProjectRow | undefined;
   }
 
-  getActiveRun(projectId: string): RunRow | undefined {
+  getActiveRun(projectId: string, sessionId?: string): RunRow | undefined {
+    if (sessionId) {
+      return db
+        .prepare(
+          `SELECT * FROM runs
+            WHERE project_id = ? AND session_id = ?
+              AND status IN (${ACTIVE_RUN_STATUSES.map(() => "?").join(",")})
+            ORDER BY started_at DESC LIMIT 1`,
+        )
+        .get(projectId, sessionId, ...ACTIVE_RUN_STATUSES) as RunRow | undefined;
+    }
+    // Compatibility callers without a session mean the project's shared
+    // active session, not every branch below it.
     return db
       .prepare(
-        `SELECT * FROM runs WHERE project_id = ? AND status IN (${ACTIVE_RUN_STATUSES.map(() => "?").join(",")})
-         ORDER BY started_at DESC LIMIT 1`,
+        `SELECT r.* FROM runs r
+           JOIN projects p ON p.id = r.project_id AND p.session_id = r.session_id
+          WHERE r.project_id = ?
+            AND r.status IN (${ACTIVE_RUN_STATUSES.map(() => "?").join(",")})
+          ORDER BY r.started_at DESC LIMIT 1`,
       )
       .get(projectId, ...ACTIVE_RUN_STATUSES) as RunRow | undefined;
   }
@@ -201,7 +217,15 @@ class RunManager extends EventEmitter {
    * replay it whole from after_seq=-1, and paint the discarded transcript
    * straight back into the empty thread.
    */
-  getLatestRun(projectId: string): RunRow | undefined {
+  getLatestRun(projectId: string, sessionId?: string): RunRow | undefined {
+    if (sessionId) {
+      return db
+        .prepare(
+          `SELECT * FROM runs WHERE project_id = ? AND session_id = ?
+           ORDER BY started_at DESC LIMIT 1`,
+        )
+        .get(projectId, sessionId) as RunRow | undefined;
+    }
     return db
       .prepare(
         `SELECT r.* FROM runs r
@@ -229,11 +253,17 @@ class RunManager extends EventEmitter {
     projectId: string,
     text: string,
     attachments: Attachment[] = [],
-    opts: { prefer?: "steer" | "queue" } = {},
+    opts: { prefer?: "steer" | "queue"; sessionId?: string } = {},
   ): Promise<{ queued: boolean; mode: "started" | "steered" | "queued"; runId: string }> {
-    const active = this.getActiveRun(projectId);
+    const project = this.getProject(projectId);
+    if (!project) throw new Error(`Unknown project: ${projectId}`);
+    const sessionId = opts.sessionId ?? project.session_id;
+    if (!getProjectSession(projectId, sessionId)) {
+      throw new Error(`Unknown session: ${sessionId}`);
+    }
+    const active = this.getActiveRun(projectId, sessionId);
     if (!active) {
-      const runId = await this.startRun(projectId, text, attachments);
+      const runId = await this.startRun(projectId, text, attachments, sessionId);
       return { queued: false, mode: "started", runId };
     }
 
@@ -249,8 +279,9 @@ class RunManager extends EventEmitter {
     // body_json was already JSON, so carrying attachments through the queue
     // needs no migration — an older row simply has no `attachments` key.
     db.prepare(
-      `INSERT INTO queued_messages (id, project_id, body_json, created_at) VALUES (?, ?, ?, ?)`,
-    ).run(id, projectId, JSON.stringify({ text, attachments }), Date.now());
+      `INSERT INTO queued_messages
+        (id, project_id, session_id, body_json, created_at) VALUES (?, ?, ?, ?, ?)`,
+    ).run(id, projectId, sessionId, JSON.stringify({ text, attachments }), Date.now());
     return { queued: true, mode: "queued", runId: active.run_id };
   }
 
@@ -309,15 +340,20 @@ class RunManager extends EventEmitter {
     projectId: string,
     text: string,
     attachments: Attachment[] = [],
+    sessionId?: string,
   ): Promise<string> {
     const project = this.getProject(projectId);
     if (!project) throw new Error(`Unknown project: ${projectId}`);
+    const targetSessionId = sessionId ?? project.session_id;
+    if (!getProjectSession(projectId, targetSessionId)) {
+      throw new Error(`Unknown session: ${targetSessionId}`);
+    }
 
     const conversationHistory = await this.buildConversationHistory(
-      project.session_id,
+      targetSessionId,
     );
     const { run_id: runId } = await hermes.startRun({
-      sessionId: project.session_id,
+      sessionId: targetSessionId,
       input: composeInput(text, attachments),
       conversationHistory,
       // Re-sent every run so the project's framing outlives compaction.
@@ -341,7 +377,7 @@ class RunManager extends EventEmitter {
     ).run(
       runId,
       projectId,
-      project.session_id,
+      targetSessionId,
       startedAt,
       // A photo with no caption still deserves a searchable, notifiable
       // preview — the filenames are all there is.
@@ -351,6 +387,10 @@ class RunManager extends EventEmitter {
       startedAt,
       projectId,
     );
+    db.prepare(
+      `UPDATE project_sessions SET last_active_at = ? WHERE session_id = ?`,
+    ).run(startedAt, targetSessionId);
+    void autoNameSession(projectId, targetSessionId, text);
 
     // Fire-and-forget: this holds the one allowed upstream connection to
     // Hermes for the run's whole life and must not be dropped on our side.
@@ -539,9 +579,8 @@ class RunManager extends EventEmitter {
       await sendToAll({
         title: name,
         body,
-        url: `/p/${run.project_id}`,
-        // one row per project, so a busy project doesn't bury everything else
-        tag: `${APP_SLUG}-${run.project_id}`,
+        url: `/p/${run.project_id}/s/${run.session_id}`,
+        tag: `${APP_SLUG}-${run.project_id}-${run.session_id}`,
         kind,
       });
     } catch (err) {
@@ -582,18 +621,23 @@ class RunManager extends EventEmitter {
     }
 
     const run = this.getRun(runId);
-    if (run) this.drainQueue(run.project_id).catch((err) => {
-      console.error(`[run-manager] drainQueue failed for ${run.project_id}:`, err);
+    if (run) this.drainQueue(run.project_id, run.session_id).catch((err) => {
+      console.error(
+        `[run-manager] drainQueue failed for ${run.project_id}/${run.session_id}:`,
+        err,
+      );
     });
   }
 
-  private async drainQueue(projectId: string) {
+  private async drainQueue(projectId: string, sessionId: string) {
     const next = db
       .prepare(
-        `SELECT * FROM queued_messages WHERE project_id = ? ORDER BY created_at ASC LIMIT 1`,
+        `SELECT * FROM queued_messages
+          WHERE project_id = ? AND session_id = ?
+          ORDER BY created_at ASC LIMIT 1`,
       )
-      .get(projectId) as
-      | { id: string; project_id: string; body_json: string }
+      .get(projectId, sessionId) as
+      | { id: string; project_id: string; session_id: string; body_json: string }
       | undefined;
     if (!next) return;
     db.prepare(`DELETE FROM queued_messages WHERE id = ?`).run(next.id);
@@ -601,7 +645,7 @@ class RunManager extends EventEmitter {
       text: string;
       attachments?: Attachment[];
     };
-    await this.startRun(projectId, body.text, body.attachments ?? []);
+    await this.startRun(projectId, body.text, body.attachments ?? [], sessionId);
   }
 
   /**

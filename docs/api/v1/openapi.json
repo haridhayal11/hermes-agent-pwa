@@ -84,6 +84,21 @@
         }
       }
     },
+    "/api/v1/changes": {
+      "get": {
+        "operationId": "streamChanges",
+        "summary": "Replay and follow project, session, job, and settings changes",
+        "description": "The global cursor is distinct from run cursors. An expired cursor emits sync.reset so clients refetch authoritative snapshots.",
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "integer", "minimum": 0 } },
+          { "name": "Last-Event-ID", "in": "header", "schema": { "type": "integer", "minimum": 0 } }
+        ],
+        "responses": {
+          "200": { "description": "Replayable SSE frames", "content": { "text/event-stream": { "schema": { "type": "string" }, "x-sse-data-schema": { "$ref": "#/components/schemas/ChangeEvent" } } } },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/v1/projects": {
       "get": {
         "operationId": "listProjects",
@@ -178,6 +193,7 @@
       "patch": {
         "operationId": "updateProject",
         "summary": "Update project metadata used on subsequent runs",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": {
           "required": true,
           "content": {
@@ -211,6 +227,7 @@
         "operationId": "deleteProject",
         "summary": "Archive or explicitly purge a project",
         "parameters": [
+          { "$ref": "#/components/parameters/IdempotencyKey" },
           { "name": "purge", "in": "query", "schema": { "type": "boolean", "default": false } },
           { "name": "session", "in": "query", "description": "With purge=true, also delete the authoritative Hermes conversation.", "schema": { "type": "boolean", "default": false } }
         ],
@@ -236,6 +253,112 @@
           "404": { "$ref": "#/components/responses/Error" },
           "502": { "$ref": "#/components/responses/Error" }
         }
+      }
+    },
+    "/api/v1/projects/{projectId}/sessions": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+      "get": {
+        "operationId": "listSessions",
+        "summary": "List the session tree and shared active selection",
+        "responses": {
+          "200": { "description": "Session tree", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionList" } } } },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "operationId": "createSession",
+        "summary": "Create and select a root session",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string", "default": "New chat" } } } } } },
+        "responses": {
+          "201": { "description": "Created session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionEnvelope" } } } },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}/sessions/{sessionId}": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
+      "get": {
+        "operationId": "getSession",
+        "summary": "Get session metadata",
+        "responses": { "200": { "description": "Session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionEnvelope" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
+      },
+      "patch": {
+        "operationId": "renameSession",
+        "summary": "Rename a session",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["title"], "properties": { "title": { "type": "string", "minLength": 1, "maxLength": 200 } } } } } },
+        "responses": { "200": { "description": "Renamed session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionEnvelope" } } } }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
+      },
+      "delete": {
+        "operationId": "deleteSessionSubtree",
+        "summary": "Delete a session and all descendants",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "responses": { "200": { "$ref": "#/components/responses/Ok" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/projects/{projectId}/sessions/{sessionId}/select": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
+      "post": {
+        "operationId": "selectSession",
+        "summary": "Change the shared active session for Android, PWA, and jobs",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "responses": { "200": { "description": "Selected session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionEnvelope" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/projects/{projectId}/sessions/{sessionId}/fork": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
+      "post": {
+        "operationId": "forkSession",
+        "summary": "Fork and select a child session",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Forked session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionEnvelope" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "501": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/projects/{projectId}/sessions/{sessionId}/messages": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
+      "get": {
+        "operationId": "listSessionMessages",
+        "summary": "Read a cursor page from authoritative session history",
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 500 } }
+        ],
+        "responses": { "200": { "description": "Message page", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessagePage" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" } }
+      },
+      "post": {
+        "operationId": "sendSessionMessage",
+        "summary": "Start, steer, or queue a message in this session",
+        "description": "Offline clients keep this session ID pinned even when another client changes the shared selection.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendMessage" } } } },
+        "responses": { "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendResult" } } } }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/projects/{projectId}/sessions/{sessionId}/events": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
+      "get": {
+        "operationId": "streamSessionEvents",
+        "summary": "Replay and follow this session's current or latest run",
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "string", "pattern": "^.+:-?[0-9]+$" } },
+          { "name": "runId", "in": "query", "schema": { "type": "string" } },
+          { "name": "Last-Event-ID", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "SSE frames", "content": { "text/event-stream": { "schema": { "type": "string" }, "x-sse-data-schema": { "$ref": "#/components/schemas/StreamEvent" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/api/v1/projects/{projectId}/sessions/{sessionId}/retry": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
+      "post": {
+        "operationId": "retrySessionRun",
+        "summary": "Retry the last failed prompt in this session",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "responses": { "202": { "description": "Retry accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendResult" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" } }
       }
     },
     "/api/v1/projects/{projectId}/messages": {
@@ -332,6 +455,10 @@
       "post": {
         "operationId": "uploadAttachment",
         "summary": "Stage one image or file on the Hermes host",
+        "parameters": [
+          { "$ref": "#/components/parameters/IdempotencyKey" },
+          { "name": "X-Content-SHA256", "in": "header", "required": true, "schema": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -400,7 +527,32 @@
           "502": { "$ref": "#/components/responses/Error" }
         }
       }
-    }
+    },
+    "/api/v1/models": { "get": { "operationId": "listModels", "summary": "List model providers and selections", "responses": { "200": { "description": "Model catalogue", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/skills": { "get": { "operationId": "listSkills", "summary": "List installed skill metadata", "responses": { "200": { "description": "Skill catalogue", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/toolsets": { "get": { "operationId": "listToolsets", "summary": "List available toolsets", "responses": { "200": { "description": "Toolset catalogue", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/search": { "get": { "operationId": "searchLocal", "summary": "Search projects, sessions, messages, and job deliveries", "parameters": [{ "name": "q", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Conversation hits carry projectId and sessionId", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/files": { "get": { "operationId": "probeFile", "summary": "Probe or download a project file", "parameters": [{ "name": "path", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "File metadata or bytes" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/settings/agent": {
+      "get": { "operationId": "getAgentName", "summary": "Get the shared agent name", "responses": { "200": { "description": "Agent name", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } },
+      "put": { "operationId": "setAgentName", "summary": "Set the shared agent name", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } } } } }, "responses": { "200": { "description": "Updated name", "content": { "application/json": { "schema": true } } }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/api/v1/maintenance": {
+      "get": { "operationId": "getMaintenanceStatus", "summary": "Inspect safe local maintenance statistics", "responses": { "200": { "description": "Maintenance statistics", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } },
+      "post": { "operationId": "pruneRunHistory", "summary": "Prune old replay events", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "hours": { "type": "number", "exclusiveMinimum": 0, "default": 24 } } } } } }, "responses": { "200": { "description": "Prune result", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/api/v1/jobs": {
+      "get": { "operationId": "listJobs", "summary": "List scheduled jobs", "responses": { "200": { "description": "Jobs", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } },
+      "post": { "operationId": "createJob", "summary": "Create a scheduled job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": true } } }, "responses": { "201": { "description": "Created job" }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "501": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/api/v1/jobs/{jobId}": {
+      "parameters": [{ "$ref": "#/components/parameters/JobId" }],
+      "patch": { "operationId": "updateJob", "summary": "Update a job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": true } } }, "responses": { "200": { "description": "Updated job" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } },
+      "delete": { "operationId": "deleteJob", "summary": "Delete a job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Ok" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/api/v1/jobs/{jobId}/pause": { "parameters": [{ "$ref": "#/components/parameters/JobId" }], "post": { "operationId": "pauseJob", "summary": "Pause a job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "description": "Paused job" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/jobs/{jobId}/resume": { "parameters": [{ "$ref": "#/components/parameters/JobId" }], "post": { "operationId": "resumeJob", "summary": "Resume a job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "description": "Resumed job" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/jobs/{jobId}/run": { "parameters": [{ "$ref": "#/components/parameters/JobId" }], "post": { "operationId": "runJob", "summary": "Run a job immediately", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "description": "Run result" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } } }
   },
   "components": {
     "securitySchemes": {
@@ -412,6 +564,8 @@
     },
     "parameters": {
       "ProjectId": { "name": "projectId", "in": "path", "required": true, "schema": { "type": "string" } },
+      "SessionId": { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } },
+      "JobId": { "name": "jobId", "in": "path", "required": true, "schema": { "type": "string" } },
       "RunId": { "name": "runId", "in": "path", "required": true, "schema": { "type": "string" } },
       "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string", "minLength": 8, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" } }
     },
@@ -496,7 +650,7 @@
       },
       "Project": {
         "type": "object",
-        "required": ["id", "name", "emoji", "color", "workingDirectory", "instructions", "pinned", "skills", "modelSelection", "sessionId", "createdAt", "lastActiveAt", "archived"],
+        "required": ["id", "name", "emoji", "color", "workingDirectory", "instructions", "pinned", "skills", "modelSelection", "activeSessionId", "sessionId", "createdAt", "lastActiveAt", "archived"],
         "properties": {
           "id": { "type": "string" },
           "name": { "type": "string" },
@@ -507,7 +661,8 @@
           "pinned": { "type": "boolean" },
           "skills": { "type": "array", "items": { "type": "string" } },
           "modelSelection": { "$ref": "#/components/schemas/ModelSelection" },
-          "sessionId": { "type": "string" },
+          "activeSessionId": { "type": "string" },
+          "sessionId": { "type": "string", "deprecated": true, "description": "Compatibility alias for activeSessionId." },
           "createdAt": { "type": "integer" },
           "lastActiveAt": { "type": "integer" },
           "archived": { "type": "boolean" }
@@ -543,6 +698,36 @@
         },
         "additionalProperties": false
       },
+      "Session": {
+        "type": "object",
+        "required": ["id", "projectId", "title", "parentSessionId", "createdAt", "lastActiveAt", "archived"],
+        "properties": {
+          "id": { "type": "string" },
+          "projectId": { "type": "string" },
+          "title": { "type": "string" },
+          "parentSessionId": { "type": ["string", "null"] },
+          "createdAt": { "type": "integer" },
+          "lastActiveAt": { "type": "integer" },
+          "archived": { "type": "boolean" }
+        }
+      },
+      "SessionEnvelope": {
+        "type": "object",
+        "required": ["session"],
+        "properties": {
+          "session": { "$ref": "#/components/schemas/Session" },
+          "activeSessionId": { "type": "string" },
+          "messageCount": { "type": ["integer", "null"] }
+        }
+      },
+      "SessionList": {
+        "type": "object",
+        "required": ["activeSessionId", "sessions"],
+        "properties": {
+          "activeSessionId": { "type": "string" },
+          "sessions": { "type": "array", "items": { "$ref": "#/components/schemas/Session" } }
+        }
+      },
       "Message": {
         "type": "object",
         "required": ["role"],
@@ -554,6 +739,15 @@
           "cron": { "type": "object", "additionalProperties": true }
         },
         "additionalProperties": true
+      },
+      "MessagePage": {
+        "type": "object",
+        "required": ["messages", "nextCursor", "hasMore"],
+        "properties": {
+          "messages": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } },
+          "nextCursor": { "type": ["string", "null"] },
+          "hasMore": { "type": "boolean" }
+        }
       },
       "Attachment": {
         "oneOf": [
@@ -591,11 +785,12 @@
       },
       "SendResult": {
         "type": "object",
-        "required": ["queued", "mode", "runId"],
+        "required": ["queued", "mode", "runId", "sessionId"],
         "properties": {
           "queued": { "type": "boolean" },
           "mode": { "enum": ["started", "steered", "queued"] },
-          "runId": { "type": "string" }
+          "runId": { "type": "string" },
+          "sessionId": { "type": "string" }
         }
       },
       "ApprovalResponse": {
@@ -614,6 +809,16 @@
           "runId": { "type": ["string", "null"] },
           "sequence": { "type": ["integer", "null"] },
           "occurredAt": { "type": "integer", "description": "Unix epoch milliseconds" },
+          "payload": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "ChangeEvent": {
+        "type": "object",
+        "required": ["type", "sequence", "occurredAt", "payload"],
+        "properties": {
+          "type": { "type": "string" },
+          "sequence": { "type": ["integer", "null"] },
+          "occurredAt": { "type": "integer" },
           "payload": { "type": "object", "additionalProperties": true }
         }
       },

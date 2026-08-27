@@ -22,6 +22,36 @@ export async function idempotentJson(
   scope: string,
   action: () => Promise<Response>,
 ): Promise<Response> {
+  const body = await request.clone().text();
+  const requestHash = createHash("sha256")
+    .update(`${scope}\n`, "utf8")
+    .update(body, "utf8")
+    .digest("hex");
+  return idempotentByHash(request, deviceId, requestHash, action);
+}
+
+/** Multipart writes cannot be hashed as text. The caller verifies the content
+ * digest against the uploaded File, then combines it with stable metadata. */
+export async function idempotentDigest(
+  request: Request,
+  deviceId: string,
+  scope: string,
+  digest: string,
+  metadata: string,
+  action: () => Promise<Response>,
+): Promise<Response> {
+  const requestHash = createHash("sha256")
+    .update(`${scope}\n${digest}\n${metadata}`, "utf8")
+    .digest("hex");
+  return idempotentByHash(request, deviceId, requestHash, action);
+}
+
+async function idempotentByHash(
+  request: Request,
+  deviceId: string,
+  requestHash: string,
+  action: () => Promise<Response>,
+): Promise<Response> {
   const key = request.headers.get("idempotency-key") ?? "";
   if (!KEY_PATTERN.test(key)) {
     return error(
@@ -31,11 +61,6 @@ export async function idempotentJson(
     );
   }
 
-  const body = await request.clone().text();
-  const requestHash = createHash("sha256")
-    .update(`${scope}\n`, "utf8")
-    .update(body, "utf8")
-    .digest("hex");
   const now = Date.now();
 
   db.prepare(`DELETE FROM api_idempotency_keys WHERE created_at < ?`).run(

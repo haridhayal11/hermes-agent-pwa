@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { NewProjectDialog } from "@/components/nav/NewProjectDialog";
 import { NewChatDialog } from "@/components/nav/NewChatDialog";
-import { ProjectRail, ProjectRailToggle } from "@/components/nav/ProjectRail";
+import { ProjectSidebar } from "@/components/nav/ProjectSidebar";
 import { HeaderMenu } from "@/components/nav/HeaderMenu";
 import { SearchOverlay } from "@/components/nav/SearchOverlay";
 import { RunStatusProvider } from "@/components/chat/RunStatusContext";
 import { AppActionsProvider } from "@/components/AppActionsContext";
-import { IconEdit } from "@/components/primitives/icons";
-import type { Project } from "@/lib/chat-types";
+import { IconEdit, IconMenu } from "@/components/primitives/icons";
+import type { Project, ProjectSession } from "@/lib/chat-types";
 
 /* One column, no sidebar. Switching projects is the rail hanging off the
  * header title; the drawer and the lg-and-up sidebar it mirrored are gone.
@@ -30,13 +31,17 @@ import type { Project } from "@/lib/chat-types";
 
 export function AppShell({
   projects,
+  sessions = [],
   activeId,
+  activeSessionId,
   title,
   activeProject,
   children,
 }: {
   projects: Project[];
+  sessions?: ProjectSession[];
   activeId?: string;
+  activeSessionId?: string;
   title: string;
   /** drives the header menu's "Edit project"; absent on the empty state */
   activeProject?: Project;
@@ -44,13 +49,67 @@ export function AppShell({
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
-  const [railOpen, setRailOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const router = useRouter();
+
+  // Direct links also participate in the shared active-session contract.
+  useEffect(() => {
+    if (!activeProject || !activeSessionId || activeProject.session_id === activeSessionId) {
+      return;
+    }
+    void fetch(
+      `/api/projects/${activeProject.id}/sessions/${activeSessionId}/select`,
+      { method: "POST" },
+    );
+  }, [activeProject, activeSessionId]);
+
+  // Another browser or the native app may select a different branch. Follow
+  // the durable change stream rather than waiting for a focus refresh.
+  useEffect(() => {
+    const source = new EventSource("/api/changes");
+    source.addEventListener("change", (raw) => {
+      try {
+        const event = JSON.parse((raw as MessageEvent).data) as {
+          type?: string;
+          payload?: { projectId?: string; sessionId?: string };
+        };
+        const payload = event.payload;
+        if (
+          event.type === "session.selected" &&
+          payload?.projectId === activeId &&
+          payload?.sessionId &&
+          payload.sessionId !== activeSessionId
+        ) {
+          router.replace(`/p/${activeId}/s/${payload.sessionId}`);
+          return;
+        }
+        if (event.type === "sync.reset" || event.type?.endsWith(".changed")) {
+          router.refresh();
+        }
+      } catch {
+        // Ignore malformed invalidations; normal navigation still refreshes.
+      }
+    });
+    return () => source.close();
+  }, [activeId, activeSessionId, router]);
 
   return (
     <div className="h-app flex w-full overflow-hidden bg-page">
       <RunStatusProvider>
         <AppActionsProvider openSearch={() => setSearchOpen(true)}>
+          <ProjectSidebar
+            projects={projects}
+            sessions={sessions}
+            activeProjectId={activeId}
+            activeSessionId={activeSessionId}
+            open={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            onNewProject={() => {
+              setSidebarOpen(false);
+              setDialogOpen(true);
+            }}
+          />
           <div className="flex min-w-0 flex-1 flex-col">
             {/* The inset is padding on the bar, and the 56px row is a child of it.
              * Putting both on one element (a fixed height + padding-top: 59px)
@@ -62,48 +121,41 @@ export function AppShell({
                * whatever sits either side of it. */}
               <div className="grid h-14 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 px-1.5">
                 <div className="flex size-9 items-center justify-center">
+                  <button
+                    type="button"
+                    aria-label="Open projects and sessions"
+                    onClick={() => setSidebarOpen(true)}
+                    className="tap-target grid size-9 place-items-center rounded-control text-ink-2 hover:bg-hover-2 lg:invisible"
+                  >
+                    <IconMenu size={17} />
+                  </button>
+                </div>
+
+                <div className="flex min-w-0 items-center justify-center">
+                  <h1 className="max-w-full truncate px-3 text-ui font-semibold text-ink">
+                    {title}
+                  </h1>
+                </div>
+
+                <div className="flex items-center">
                   <HeaderMenu
                     project={activeProject}
                     onSearch={() => setSearchOpen(true)}
                   />
+                  <button
+                    type="button"
+                    aria-label={activeProject ? "New chat" : "New project"}
+                    onClick={() =>
+                      activeProject ? setNewChatOpen(true) : setDialogOpen(true)
+                    }
+                    className="tap-target flex size-9 items-center justify-center rounded-control text-ink-2
+                    transition-colors duration-100 hover:bg-hover-2 hover:text-ink active:scale-[0.96]"
+                  >
+                    <IconEdit size={17} />
+                  </button>
                 </div>
-
-                <div className="flex min-w-0 items-center justify-center">
-                  <ProjectRailToggle
-                    title={title}
-                    open={railOpen}
-                    onToggle={() => setRailOpen((current) => !current)}
-                    interactive={projects.length > 0}
-                  />
-                </div>
-
-                {/* New chat, not new project — the rail's "+" tile is where a
-                  * project is made. With nothing open there is no thread to
-                  * restart, so on the empty state it falls back to creating one. */}
-                <button
-                  type="button"
-                  aria-label={activeProject ? "New chat" : "New project"}
-                  onClick={() =>
-                    activeProject ? setNewChatOpen(true) : setDialogOpen(true)
-                  }
-                  className="tap-target flex size-9 items-center justify-center rounded-control text-ink-2
-                  transition-colors duration-100 hover:bg-hover-2 hover:text-ink active:scale-[0.96]"
-                >
-                  <IconEdit size={17} />
-                </button>
               </div>
             </header>
-
-            <ProjectRail
-              projects={projects}
-              activeId={activeId}
-              open={railOpen}
-              onSelect={() => setRailOpen(false)}
-              onNewProject={() => {
-                setRailOpen(false);
-                setDialogOpen(true);
-              }}
-            />
 
             <main className="flex min-h-0 flex-1 flex-col">{children}</main>
           </div>

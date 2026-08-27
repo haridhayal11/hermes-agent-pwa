@@ -20,7 +20,11 @@ export interface StreamEvent {
  * static "nothing to show" branch server-side and won't discover a run that
  * starts later on its own.
  */
-export function useRunStream(projectId: string, onEvent: (evt: StreamEvent) => void) {
+export function useRunStream(
+  projectId: string,
+  sessionId: string,
+  onEvent: (evt: StreamEvent) => void,
+) {
   const lastSeqRef = useRef(-1);
   const onEventRef = useRef(onEvent);
   const connectRef = useRef<() => void>(() => {});
@@ -39,7 +43,7 @@ export function useRunStream(projectId: string, onEvent: (evt: StreamEvent) => v
       if (disposed) return;
       source?.close();
       if (retryTimer) clearTimeout(retryTimer);
-      const url = `/api/projects/${projectId}/stream?after_seq=${lastSeqRef.current}`;
+      const url = `/api/projects/${projectId}/sessions/${sessionId}/events?after_seq=${lastSeqRef.current}`;
       source = new EventSource(url);
 
       source.onmessage = (e) => {
@@ -75,7 +79,7 @@ export function useRunStream(projectId: string, onEvent: (evt: StreamEvent) => v
       if (retryTimer) clearTimeout(retryTimer);
       source?.close();
     };
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   return {
     reconnect: useCallback(() => connectRef.current(), []),

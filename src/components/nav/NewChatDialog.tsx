@@ -50,14 +50,19 @@ function NewChatConfirm({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/reset`, { method: "POST" });
+      const res = await fetch(`/api/projects/${projectId}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "New chat" }),
+      });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         // 409 while a run is active — the route refuses rather than orphan it.
         throw new Error(body.error || `${res.status}`);
       }
+      const body = (await res.json()) as { session: { id: string } };
       onClose();
-      // ChatThread is keyed on session_id, so the refresh remounts the thread.
+      router.push(`/p/${projectId}/s/${body.session.id}`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start a new chat");
@@ -90,9 +95,8 @@ function NewChatConfirm({
         <div className="primitive-card-pad">
           <span className="text-ui font-medium text-ink">Start a new chat?</span>
           <p className="mt-1.5 text-meta leading-snug text-ink-2">
-            The project keeps its name, instructions and skills, and points at a
-            new Hermes conversation. The old transcript stays reachable from the
-            CLI. Not possible while a run is active.
+            The project keeps its name, instructions and skills. The current
+            conversation stays in the project tree, and a new one opens beside it.
           </p>
           {error && (
             <p

@@ -19,6 +19,7 @@ interface MessageHit {
   projectId: string;
   projectName: string;
   projectEmoji: string | null;
+  sessionId: string;
   runId: string;
   preview: string;
   startedAt: number;
@@ -29,6 +30,7 @@ interface DeliveryHit {
   projectId: string;
   projectName: string;
   projectEmoji: string | null;
+  sessionId: string;
   jobName: string;
   snippet: string;
   ts: number;
@@ -183,7 +185,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
               {shown.messages.map((hit) => (
                 <Row
                   key={hit.runId}
-                  href={`/p/${hit.projectId}`}
+                  href={`/p/${hit.projectId}/s/${hit.sessionId}`}
                   onNavigate={onClose}
                   icon={<IconMessage size={14} />}
                   title={hit.preview}
@@ -200,7 +202,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
               {shown.deliveries.map((hit) => (
                 <Row
                   key={hit.id}
-                  href={`/p/${hit.projectId}`}
+                  href={`/p/${hit.projectId}/s/${hit.sessionId}`}
                   onNavigate={onClose}
                   icon={<IconMessage size={14} />}
                   title={hit.snippet}

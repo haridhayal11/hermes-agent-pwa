@@ -174,3 +174,13 @@ export interface Project {
   last_active_at: number;
   archived: number;
 }
+
+export interface ProjectSession {
+  session_id: string;
+  project_id: string;
+  title: string;
+  parent_session_id: string | null;
+  created_at: number;
+  last_active_at: number;
+  archived: number;
+}

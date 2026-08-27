@@ -59,6 +59,8 @@ export function projectDto(project: StoredProject) {
           options: parseObject(project.model_options),
         }
       : null,
+    activeSessionId: project.session_id,
+    // Retained for clients generated from the initial v1 contract.
     sessionId: project.session_id,
     createdAt: project.created_at,
     lastActiveAt: project.last_active_at,

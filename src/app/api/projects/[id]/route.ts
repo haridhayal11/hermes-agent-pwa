@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
-import { hermes } from "@/lib/hermes";
-import { hermesErrorResponse, renameProjectSession } from "@/lib/project-session";
+import { hermes, HermesApiError } from "@/lib/hermes";
+import { publishChange } from "@/lib/api-changes";
+import { listProjectSessions } from "@/lib/project-sessions";
 
 export async function GET(_req: Request, ctx: RouteContext<"/api/projects/[id]">) {
   const { id } = await ctx.params;
@@ -36,11 +37,6 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/projects/[id]"
   if (typeof body.name === "string") {
     updates.push("name = ?");
     values.push(body.name);
-    try {
-      await renameProjectSession(project.session_id, body.name);
-    } catch (err) {
-      return hermesErrorResponse(err);
-    }
   }
   if (typeof body.emoji === "string" || body.emoji === null) {
     updates.push("emoji = ?");
@@ -100,6 +96,7 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/projects/[id]"
   }
 
   const updated = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id);
+  if (updates.length > 0) publishChange("project.changed", { projectId: id });
   return Response.json({ project: updated });
 }
 
@@ -127,22 +124,27 @@ export async function DELETE(req: Request, ctx: RouteContext<"/api/projects/[id]
 
   if (!purge) {
     db.prepare(`UPDATE projects SET archived = 1 WHERE id = ?`).run(id);
+    publishChange("project.changed", { projectId: id });
     return Response.json({ ok: true, archived: true });
   }
 
   let sessionDeleted = false;
   if (dropSession) {
-    try {
-      await hermes.deleteSession(project.session_id);
-      sessionDeleted = true;
-    } catch {
-      // Leave the local rows alone if the transcript could not be removed —
-      // silently keeping an orphaned session is worse than a failed delete.
-      return Response.json(
-        { error: "Could not delete the Hermes conversation" },
-        { status: 502 },
-      );
+    const sessions = listProjectSessions(id, true);
+    for (const session of [...sessions].reverse()) {
+      try {
+        await hermes.deleteSession(session.session_id);
+      } catch (error) {
+        if (error instanceof HermesApiError && error.status === 404) continue;
+        // Leave the local rows alone if every transcript could not be removed.
+        // A retry is safe because Hermes answers 404 for already deleted rows.
+        return Response.json(
+          { error: "Could not delete every Hermes conversation" },
+          { status: 502 },
+        );
+      }
     }
+    sessionDeleted = true;
   }
 
   // run_events has no project_id and no foreign key, so it has to go first.
@@ -154,6 +156,8 @@ export async function DELETE(req: Request, ctx: RouteContext<"/api/projects/[id]
     db.prepare(`DELETE FROM queued_messages WHERE project_id = ?`).run(id);
     db.prepare(`DELETE FROM projects WHERE id = ?`).run(id);
   })();
+
+  publishChange("project.deleted", { projectId: id });
 
   return Response.json({ ok: true, deleted: true, sessionDeleted });
 }

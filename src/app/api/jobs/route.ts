@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { hermes, type CreateJobParams, type HermesJob } from "@/lib/hermes";
 import { isCronUnavailable, jobErrorResponse } from "@/lib/job-errors";
 import { fireKey, setBinding } from "@/lib/cron-watcher";
+import { publishChange } from "@/lib/api-changes";
 
 // Live proxy: never cached. A zero-argument GET is prerendered at build time
 // otherwise, and this one would serve an empty job list forever.
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
       // A job that has never fired stamps "", so its first output delivers.
       setBinding(job.id, projectId, fireKey(job) ?? "");
     }
+    publishChange("job.changed", { jobId: job.id });
     return Response.json({ job }, { status: 201 });
   } catch (err) {
     return jobErrorResponse(err);

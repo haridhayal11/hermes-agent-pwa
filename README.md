@@ -5,10 +5,10 @@ An installable, mobile-first command center for a self-hosted
 same machine as your gateway, is reachable only over your tailnet, and goes on
 your phone's home screen.
 
-It is deliberately **not** a clone of the Hermes dashboard. The organising idea
-is **one durable chat per project**, not a new chat per session — a project is
-a long-lived thread you come back to for weeks. There is no "new chat" button,
-by design.
+It is deliberately **not** a clone of the Hermes dashboard. Projects retain
+their working directory, instructions, model, and skills while containing a
+tree of durable chats. The active chat selection is shared by the PWA, Android,
+and scheduled-job delivery.
 
 ```
 iPhone / Mac PWA  (installed, https://<node>.<tailnet>.ts.net)
@@ -73,9 +73,9 @@ push notifications can exist.
 
 ## What it does
 
-- **Durable projects.** Each one is a Hermes session with its own instructions,
-  working directory, model and linked skills. Compaction happens in place, so
-  the session id lasts the project's whole life.
+- **Durable projects and session trees.** New chats are roots, forks are child
+  branches, and each session streams and queues independently while sharing
+  the project's instructions, working directory, model, and linked skills.
 - **Streaming that survives a locked phone**, plus stop, steer, approvals and a
   message queue.
 - **Web Push** on completion, on an approval request, on a question, and on a
@@ -118,9 +118,9 @@ runs separately. `tsc` has to run after at least one `next dev` or `next build`:
 which is not in the repo, so a typecheck on a fresh clone fails with
 `Cannot find name 'RouteContext'` until something has generated them.
 
-There is no test suite. Verification is done against a live Hermes instance;
-`CLAUDE.md` describes the checks that actually catch things, the disconnect
-test chief among them.
+`pnpm test` runs server contract tests and `pnpm openapi:check` verifies that
+every versioned route is represented in the public contract. Android unit,
+lint, and APK tasks run from the checked-in Gradle wrapper under `android/`.
 
 [`CLAUDE.md`](CLAUDE.md) is the design document — the architecture, the
 invariants, and a long list of Hermes API constraints verified by reading the

@@ -46,6 +46,26 @@ function openDb(): Database.Database {
       prompt_preview TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id, started_at);
+    CREATE INDEX IF NOT EXISTS idx_runs_session
+      ON runs(project_id, session_id, started_at);
+
+    /* A project is shared context (cwd, instructions, skills and model), while
+     * sessions are the durable conversations displayed below it in both
+     * clients. projects.session_id remains the shared active pointer so old
+     * browser routes keep working during the v1 migration. */
+    CREATE TABLE IF NOT EXISTS project_sessions (
+      session_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      parent_session_id TEXT REFERENCES project_sessions(session_id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      last_active_at INTEGER NOT NULL,
+      archived INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_sessions_project
+      ON project_sessions(project_id, archived, last_active_at);
+    CREATE INDEX IF NOT EXISTS idx_project_sessions_parent
+      ON project_sessions(parent_session_id);
 
     CREATE TABLE IF NOT EXISTS run_events (
       run_id TEXT NOT NULL,
@@ -58,10 +78,23 @@ function openDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS queued_messages (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      session_id TEXT,
       body_json TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_queued_project ON queued_messages(project_id, created_at);
+
+    /* Resource changes have a cursor namespace of their own. They are not run
+     * events: a native client reconnecting with runId:seq must never apply it
+     * here. Consumers refetch the named resource after each small event. */
+    CREATE TABLE IF NOT EXISTS api_change_events (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_change_events_created
+      ON api_change_events(created_at);
 
     CREATE TABLE IF NOT EXISTS push_subscriptions (
       endpoint TEXT PRIMARY KEY,
@@ -183,12 +216,75 @@ function migrate(db: Database.Database) {
   addColumn(db, "projects", "provider", "TEXT");
   // JSON of Hermes model_options: {reasoning:{enabled,effort}, fast}
   addColumn(db, "projects", "model_options", "TEXT");
+  addColumn(db, "queued_messages", "session_id", "TEXT");
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_queued_session
+    ON queued_messages(project_id, session_id, created_at)`);
   // JSON array of PushKind this device wants. NULL means every kind, which is
   // what a subscription created before the switches existed has to keep
   // meaning — an upgrade must not silently mute anyone.
   addColumn(db, "push_subscriptions", "kinds_json", "TEXT");
   dedupeCronDeliveries(db);
   dropBindingNotify(db);
+  backfillProjectSessions(db);
+  backfillQueuedSessionIds(db);
+}
+
+/**
+ * Turns the former one-session pointer into a first-class tree without losing
+ * sessions that were replaced by /new but still have local run/delivery rows.
+ * Their parent is unknowable, so historical rows become roots. The active
+ * session gets the project's name; older rows use their prompt preview when
+ * possible and can be renamed normally afterwards.
+ */
+function backfillProjectSessions(db: Database.Database) {
+  const now = Date.now();
+  db.exec(`
+    INSERT OR IGNORE INTO project_sessions
+      (session_id, project_id, title, parent_session_id, created_at, last_active_at, archived)
+    SELECT p.session_id, p.id, p.name, NULL, p.created_at, p.last_active_at, 0
+      FROM projects p;
+
+    INSERT OR IGNORE INTO project_sessions
+      (session_id, project_id, title, parent_session_id, created_at, last_active_at, archived)
+    SELECT r.session_id,
+           r.project_id,
+           COALESCE(NULLIF(MIN(r.prompt_preview), ''), 'Previous chat'),
+           NULL,
+           MIN(r.started_at),
+           MAX(COALESCE(r.ended_at, r.started_at)),
+           0
+      FROM runs r
+     GROUP BY r.project_id, r.session_id;
+
+    INSERT OR IGNORE INTO project_sessions
+      (session_id, project_id, title, parent_session_id, created_at, last_active_at, archived)
+    SELECT d.session_id,
+           d.project_id,
+           'Previous chat',
+           NULL,
+           MIN(d.ts),
+           MAX(d.ts),
+           0
+      FROM cron_deliveries d
+     GROUP BY d.project_id, d.session_id;
+  `);
+
+  // Empty databases never use this value, but binding it documents that a
+  // migration must not manufacture a zero timestamp if an old row is odd.
+  db.prepare(
+    `UPDATE project_sessions SET created_at = ?, last_active_at = ?
+      WHERE created_at IS NULL OR last_active_at IS NULL`,
+  ).run(now, now);
+}
+
+function backfillQueuedSessionIds(db: Database.Database) {
+  db.exec(`
+    UPDATE queued_messages
+       SET session_id = (
+         SELECT p.session_id FROM projects p WHERE p.id = queued_messages.project_id
+       )
+     WHERE session_id IS NULL;
+  `);
 }
 
 /**

@@ -273,10 +273,16 @@ async function deliver(job: HermesJob, binding: CronBinding, file: string) {
   );
   if (inserted.changes === 0) return;
 
-  db.prepare(`UPDATE projects SET last_active_at = ? WHERE id = ?`).run(
-    Date.now(),
-    binding.project_id,
-  );
+  const activeAt = Date.now();
+  db.transaction(() => {
+    db.prepare(`UPDATE projects SET last_active_at = ? WHERE id = ?`).run(
+      activeAt,
+      binding.project_id,
+    );
+    db.prepare(
+      `UPDATE project_sessions SET last_active_at = ? WHERE session_id = ?`,
+    ).run(activeAt, project.session_id);
+  })();
 
   // Live, for a thread that happens to be open. The durable copy is the row
   // above, which the history route merges back in on reload.
@@ -292,7 +298,7 @@ async function deliver(job: HermesJob, binding: CronBinding, file: string) {
       status === "failed"
         ? `${job.name} failed.`
         : `${job.name}: ${plainText(body).slice(0, 140)}`,
-    url: `/p/${binding.project_id}`,
+    url: `/p/${binding.project_id}/s/${project.session_id}`,
     // Its own tag: a scheduled result arriving overnight must not silently
     // replace the notification for the run you were watching before bed.
     tag: `${APP_SLUG}-job-${binding.project_id}`,

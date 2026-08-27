@@ -74,7 +74,11 @@ function commandText(value: unknown): string | null {
   return JSON.stringify(value, null, 2);
 }
 
-export function useThread(projectId: string, initialMessages: ThreadMessage[]) {
+export function useThread(
+  projectId: string,
+  sessionId: string,
+  initialMessages: ThreadMessage[],
+) {
   const { prefs } = usePreferences();
   const [messages, setMessages] = useState<ThreadMessage[]>(initialMessages);
   const [streaming, setStreaming] = useState("");
@@ -131,7 +135,9 @@ export function useThread(projectId: string, initialMessages: ThreadMessage[]) {
   }, [streaming]);
 
   const refreshMessages = useCallback(async () => {
-    const res = await fetch(`/api/projects/${projectId}/messages`);
+    const res = await fetch(
+      `/api/projects/${projectId}/sessions/${sessionId}/messages?limit=500`,
+    );
     if (!res.ok) return;
     const body = (await res.json()) as {
       messages: {
@@ -160,7 +166,7 @@ export function useThread(projectId: string, initialMessages: ThreadMessage[]) {
           ...(m.cron ? { cron: m.cron } : {}),
         })),
     );
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   const startNewRun = useCallback((id: string) => {
     // set the ref synchronously: an event can land before the effect that
@@ -500,7 +506,7 @@ export function useThread(projectId: string, initialMessages: ThreadMessage[]) {
     [refreshMessages, resetSegments, setError, prefs.haptics],
   );
 
-  const { reconnect } = useRunStream(projectId, onEvent);
+  const { reconnect } = useRunStream(projectId, sessionId, onEvent);
 
   const send = useCallback(
     async (
@@ -526,7 +532,7 @@ export function useThread(projectId: string, initialMessages: ThreadMessage[]) {
 
       let res: Response;
       try {
-        res = await fetch(`/api/projects/${projectId}/send`, {
+        res = await fetch(`/api/projects/${projectId}/sessions/${sessionId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: trimmed, attachments, prefer }),
@@ -563,7 +569,7 @@ export function useThread(projectId: string, initialMessages: ThreadMessage[]) {
       // connection so it binds to the new run id.
       reconnect();
     },
-    [projectId, reconnect, setError, startNewRun],
+    [projectId, sessionId, reconnect, setError, startNewRun],
   );
 
   const stop = useCallback(async () => {
@@ -576,7 +582,10 @@ export function useThread(projectId: string, initialMessages: ThreadMessage[]) {
 
   const retry = useCallback(async () => {
     setErrorMessage(null);
-    const res = await fetch(`/api/projects/${projectId}/retry`, { method: "POST" });
+    const res = await fetch(
+      `/api/projects/${projectId}/sessions/${sessionId}/retry`,
+      { method: "POST" },
+    );
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       setError(body.error ?? "Retry failed");
@@ -587,7 +596,7 @@ export function useThread(projectId: string, initialMessages: ThreadMessage[]) {
       startNewRun(body.runId);
       reconnect();
     }
-  }, [projectId, reconnect, setError, startNewRun]);
+  }, [projectId, sessionId, reconnect, setError, startNewRun]);
 
   const respondApproval = useCallback(
     async (choice: string, all = false) => {

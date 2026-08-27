@@ -27,6 +27,7 @@ interface DeliveryHit {
   projectId: string;
   projectName: string;
   projectEmoji: string | null;
+  sessionId: string;
   jobName: string;
   snippet: string;
   ts: number;
@@ -36,6 +37,7 @@ interface MessageHit {
   projectId: string;
   projectName: string;
   projectEmoji: string | null;
+  sessionId: string;
   runId: string;
   preview: string;
   startedAt: number;
@@ -98,7 +100,8 @@ export async function GET(req: Request) {
 
   const messageRows = db
     .prepare(
-      `SELECT r.run_id AS runId, r.project_id AS projectId, r.started_at AS startedAt,
+      `SELECT r.run_id AS runId, r.project_id AS projectId, r.session_id AS sessionId,
+              r.started_at AS startedAt,
               r.prompt_preview AS preview, p.name AS projectName, p.emoji AS projectEmoji
          FROM runs r
          JOIN projects p ON p.id = r.project_id
@@ -116,12 +119,12 @@ export async function GET(req: Request) {
 
   const deliveryRows = db
     .prepare(
-      `SELECT d.id, d.project_id AS projectId, d.job_name AS jobName,
+      `SELECT d.id, d.project_id AS projectId, d.session_id AS sessionId,
+              d.job_name AS jobName,
               d.body, d.ts, p.name AS projectName, p.emoji AS projectEmoji
          FROM cron_deliveries d
          JOIN projects p ON p.id = d.project_id
         WHERE p.archived = 0
-          AND d.session_id = p.session_id
           AND d.body LIKE ? ESCAPE '\\'
         ORDER BY d.ts DESC
         LIMIT 40`,
