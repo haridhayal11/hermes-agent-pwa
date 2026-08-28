@@ -884,10 +884,11 @@
       },
       "StreamEvent": {
         "type": "object",
-        "required": ["type", "runId", "sequence", "occurredAt", "payload"],
+        "required": ["type", "runId", "runActive", "sequence", "occurredAt", "payload"],
         "properties": {
           "type": { "type": "string", "description": "message.delta, tool.started, tool.completed, reasoning.available, subagent.start, subagent.complete, approval.request, approval.responded, run.steered, run.stopping, run.completed, run.failed, run.cancelled, or a project event" },
           "runId": { "type": ["string", "null"] },
+          "runActive": { "type": ["boolean", "null"], "description": "Whether the referenced run is currently active; null for project events without a run" },
           "sequence": { "type": ["integer", "null"] },
           "occurredAt": { "type": "integer", "description": "Unix epoch milliseconds" },
           "payload": { "type": "object", "additionalProperties": true }

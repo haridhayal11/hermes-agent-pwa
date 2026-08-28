@@ -41,11 +41,10 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -75,18 +74,37 @@ internal fun messagesForSession(
     selectedSessionId: String?,
 ): List<MessageDto> = snapshot.messages.takeIf { snapshot.sessionId == selectedSessionId }.orEmpty()
 
-internal fun runEventPolicy(type: String, hasRunId: Boolean, wasRunning: Boolean): RunEventPolicy {
+internal fun runEventPolicy(
+    type: String,
+    hasRunId: Boolean,
+    wasRunning: Boolean,
+    runActive: Boolean? = null,
+): RunEventPolicy {
     val terminal = type in setOf("run.completed", "run.failed", "run.cancelled", "done", "error")
     val startsOrUpdatesRun = type.contains("start") || type.contains("status") || hasRunId
     return RunEventPolicy(
         running = when {
             terminal -> false
+            // The native stream replays the latest run so completed chats can
+            // reconstruct tool activity. Those historical frames must not
+            // temporarily put the composer back into its live "Working" state.
+            runActive == false -> false
             startsOrUpdatesRun -> true
             else -> wasRunning
         },
         refreshMessages = terminal || type == "cron.delivered",
     )
 }
+
+internal fun streamCompletionSettlesSelection(
+    cause: Throwable?,
+    streamProjectId: String,
+    streamSessionId: String,
+    selectedProjectId: String?,
+    selectedSessionId: String?,
+): Boolean = cause == null &&
+    streamProjectId == selectedProjectId &&
+    streamSessionId == selectedSessionId
 
 internal fun resolveSelection(
     tree: ProjectTree,
@@ -133,7 +151,6 @@ class MainViewModel @Inject constructor(
     private val events = MutableStateFlow<List<StreamEventDto>>(emptyList())
     private val run = MutableStateFlow<Pair<String?, Boolean>>(null to false)
     private val streamRevision = MutableStateFlow(0L)
-    private val selectionSync = Mutex()
     private var searchJob: Job? = null
     private var nextErrorId = 0L
 
@@ -255,6 +272,19 @@ class MainViewModel @Inject constructor(
                             .lastOrNull { it.runId != null && it.sequence != null }
                             ?.let { "${it.runId}:${it.sequence}" }
                         repository.sessionEvents(project, session, cursor)
+                            .onCompletion { cause ->
+                                if (
+                                    streamCompletionSettlesSelection(
+                                        cause,
+                                        project,
+                                        session,
+                                        selectedProjectId.value,
+                                        selectedSessionId.value,
+                                    )
+                                ) {
+                                    run.value = run.value.first to false
+                                }
+                            }
                     }
                         .retryWhen { cause, _ ->
                             if (repository.requiresPairing(cause)) false
@@ -270,7 +300,12 @@ class MainViewModel @Inject constructor(
                         it.runId == event.runId && it.sequence == event.sequence
                     }
                     if (!alreadyReceived) events.value = (events.value + event).takeLast(2_000)
-                    val policy = runEventPolicy(event.type, event.runId != null, run.value.second)
+                    val policy = runEventPolicy(
+                        event.type,
+                        event.runId != null,
+                        run.value.second,
+                        event.runActive,
+                    )
                     run.value = event.runId to policy.running
                     if (policy.refreshMessages) {
                         selectedProjectId.value?.let { project ->
@@ -296,23 +331,10 @@ class MainViewModel @Inject constructor(
 
     fun select(project: ProjectDto, session: SessionDto) {
         updateSelection(project.id, session.id)
-        syncSelection()
     }
 
     fun open(projectId: String, sessionId: String) {
         updateSelection(projectId, sessionId)
-        syncSelection()
-    }
-
-    private fun syncSelection() = launchAction {
-        selectionSync.withLock {
-            // Read after acquiring the lock. If several same-titled rows are
-            // tapped quickly, every queued sync converges on the last ID the
-            // user chose instead of letting network completion order decide.
-            val projectId = selectedProjectId.value ?: return@withLock
-            val sessionId = selectedSessionId.value ?: return@withLock
-            repository.selectSession(projectId, sessionId)
-        }
     }
 
     fun openProject(project: ProjectDto) = launchAction {

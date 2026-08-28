@@ -40,7 +40,7 @@ function cursorFor(row: RunEventRow): string {
   return `${row.runId}:${row.seq}`;
 }
 
-function eventData(row: RunEventRow) {
+function eventData(row: RunEventRow, runActive: boolean) {
   const type = row.event.event;
   const payload = Object.fromEntries(
     Object.entries(row.event).filter(([key]) => key !== "event" && key !== "run_id"),
@@ -48,6 +48,7 @@ function eventData(row: RunEventRow) {
   return {
     type: typeof type === "string" ? type : "unknown",
     runId: row.runId,
+    runActive,
     sequence: row.seq,
     occurredAt: row.ts,
     payload,
@@ -58,8 +59,9 @@ function enqueueRunEvent(
   controller: ReadableStreamDefaultController<Uint8Array>,
   encoder: TextEncoder,
   row: RunEventRow,
+  runActive: boolean,
 ) {
-  const data = eventData(row);
+  const data = eventData(row, runActive);
   controller.enqueue(
     encoder.encode(
       `id: ${cursorFor(row)}\nevent: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`,
@@ -170,18 +172,20 @@ async function streamVersionedEvents(
           return;
         }
 
+        const run = runManager.getRun(runId);
+        const runActive = Boolean(
+          run && !["completed", "failed", "cancelled"].includes(run.status),
+        );
         const send = (row: RunEventRow) => {
           try {
-            enqueueRunEvent(controller, encoder, row);
+            enqueueRunEvent(controller, encoder, row, runActive);
           } catch {
             // already closed
           }
         };
         unsubscribeRun = runManager.subscribe(runId, afterSequence, send);
 
-        const run = runManager.getRun(runId);
-        const active = run && !["completed", "failed", "cancelled"].includes(run.status);
-        if (!active) {
+        if (!runActive) {
           close();
           return;
         }

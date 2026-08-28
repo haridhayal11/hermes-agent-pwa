@@ -1,5 +1,6 @@
 package com.haridhayal.hermes
 
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,6 +33,29 @@ class RunEventPolicyTest {
     }
 
     @Test
+    fun historicalReplayNeverMarksACompletedRunAsWorking() {
+        val policy = runEventPolicy(
+            type = "tool.started",
+            hasRunId = true,
+            wasRunning = false,
+            runActive = false,
+        )
+        assertFalse(policy.running)
+        assertFalse(policy.refreshMessages)
+    }
+
+    @Test
+    fun replayFromAnActiveRunStillShowsWorking() {
+        val policy = runEventPolicy(
+            type = "tool.started",
+            hasRunId = true,
+            wasRunning = false,
+            runActive = true,
+        )
+        assertTrue(policy.running)
+    }
+
+    @Test
     fun unrelatedProjectEventsPreserveTheCurrentRunState() {
         val whileRunning = runEventPolicy("cron.delivered", hasRunId = false, wasRunning = true)
         val whileIdle = runEventPolicy("cron.delivered", hasRunId = false, wasRunning = false)
@@ -39,5 +63,36 @@ class RunEventPolicyTest {
         assertFalse(whileIdle.running)
         assertTrue(whileRunning.refreshMessages)
         assertTrue(whileIdle.refreshMessages)
+    }
+
+    @Test
+    fun normalStreamCloseSettlesOnlyTheSessionThatIsStillSelected() {
+        assertTrue(
+            streamCompletionSettlesSelection(
+                cause = null,
+                streamProjectId = "project",
+                streamSessionId = "session",
+                selectedProjectId = "project",
+                selectedSessionId = "session",
+            ),
+        )
+        assertFalse(
+            streamCompletionSettlesSelection(
+                cause = CancellationException("switched chats"),
+                streamProjectId = "project",
+                streamSessionId = "session",
+                selectedProjectId = "project",
+                selectedSessionId = "session",
+            ),
+        )
+        assertFalse(
+            streamCompletionSettlesSelection(
+                cause = null,
+                streamProjectId = "project",
+                streamSessionId = "old-session",
+                selectedProjectId = "project",
+                selectedSessionId = "new-session",
+            ),
+        )
     }
 }

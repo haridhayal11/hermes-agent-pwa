@@ -261,6 +261,7 @@ data class ApprovalRequest(
 data class StreamEventDto(
     val type: String,
     val runId: String? = null,
+    val runActive: Boolean? = null,
     val sequence: Long? = null,
     val occurredAt: Long,
     val payload: JsonObject = JsonObject(emptyMap()),

@@ -259,8 +259,9 @@ before the switches existed has to keep meaning.
 native view model decide which chat is visible. Selecting a session must not
 write `projects.session_id` or emit a navigation event: doing that made a tap
 on Android replace the route in every open browser. The legacy `/select`
-routes remain for compatibility. Explicit session IDs are required for
-session-specific actions. Opening a project without one resolves unread
+routes remain for compatibility, but native row taps do not call them or
+refresh the shared tree. Explicit session IDs are required for session-specific
+actions. Opening a project without one resolves unread
 Scheduled first and otherwise the most recently active ordinary chat; stored
 project session pointers are legacy compatibility fields, not navigation
 authority.
