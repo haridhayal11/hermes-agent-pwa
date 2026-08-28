@@ -259,9 +259,11 @@ before the switches existed has to keep meaning.
 native view model decide which chat is visible. Selecting a session must not
 write `projects.session_id` or emit a navigation event: doing that made a tap
 on Android replace the route in every open browser. The legacy `/select`
-routes remain as validation-only compatibility endpoints. Explicit session
-IDs are required for session-specific actions; `projects.session_id` is only a
-server fallback for legacy routes and newly created projects.
+routes remain for compatibility. Explicit session IDs are required for
+session-specific actions. Opening a project without one resolves unread
+Scheduled first and otherwise the most recently active ordinary chat; stored
+project session pointers are legacy compatibility fields, not navigation
+authority.
 
 `layout.tsx` writes the theme, text size and reduce-motion flags onto `<html>`
 from a blocking inline script, before React (and `--app-height` alongside it). It duplicates

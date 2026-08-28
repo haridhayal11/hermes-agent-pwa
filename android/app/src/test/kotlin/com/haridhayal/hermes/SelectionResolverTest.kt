@@ -43,6 +43,20 @@ class SelectionResolverTest {
     }
 
     @Test
+    fun coldStartIgnoresAStaleRememberedChatAndUsesTheMostRecentConversation() {
+        val staleProject = project("p1", "old", 20)
+        val sessions = listOf(
+            session("old", "p1", 10),
+            session("recent", "p1", 30),
+        )
+
+        assertEquals(
+            ResolvedSelection("p1", "recent"),
+            resolveSelection(ProjectTree(listOf(staleProject), sessions), null, null),
+        )
+    }
+
+    @Test
     fun aProjectWithoutSessionsRemainsSelectedWithoutInventingASession() {
         val empty = ProjectTree(listOf(project("empty", "", 1)), emptyList())
         val selection = resolveSelection(empty, null, null)

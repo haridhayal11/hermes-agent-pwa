@@ -67,9 +67,9 @@ describe("selectProjectSession", () => {
     expect(prepare).toHaveBeenCalledTimes(1);
   });
 
-  it("resolves unread Scheduled first, then the recorded normal chat", () => {
+  it("resolves unread Scheduled first, then the most recently active normal chat", () => {
     const scheduled = session("scheduled");
-    const chat = session("chat", "last-chat");
+    const chat = session("chat", "recent-chat");
     let unread = 1;
     prepare.mockImplementation((sql: string) => {
       if (sql.includes("kind = 'scheduled'")) {
@@ -78,15 +78,7 @@ describe("selectProjectSession", () => {
       if (sql.includes("COUNT(*) AS count")) {
         return { get: vi.fn().mockImplementation(() => ({ count: unread })) };
       }
-      if (sql.includes("SELECT last_chat_session_id")) {
-        return {
-          get: vi.fn().mockReturnValue({
-            last_chat_session_id: chat.session_id,
-            session_id: "legacy",
-          }),
-        };
-      }
-      if (sql.includes("session_id = ?")) {
+      if (sql.includes("kind = 'chat'")) {
         return { get: vi.fn().mockReturnValue(chat) };
       }
       throw new Error(`unexpected SQL: ${sql}`);

@@ -150,18 +150,6 @@ export function withProjectNavigation<T extends { id: string }>(project: T) {
 export function projectEntrySession(projectId: string): ProjectSessionRow | null {
   const scheduled = scheduledSessionFor(projectId);
   if (scheduled && unreadScheduledCount(projectId) > 0) return scheduled;
-  const project = db
-    .prepare(`SELECT last_chat_session_id, session_id FROM projects WHERE id = ?`)
-    .get(projectId) as
-    | { last_chat_session_id: string | null; session_id: string }
-    | undefined;
-  if (!project) return null;
-  const preferred = project.last_chat_session_id
-    ? getProjectSession(projectId, project.last_chat_session_id)
-    : undefined;
-  if (preferred?.kind === "chat" && preferred.archived === 0) return preferred;
-  const legacy = getProjectSession(projectId, project.session_id);
-  if (legacy?.kind === "chat" && legacy.archived === 0) return legacy;
   return (
     (db
       .prepare(

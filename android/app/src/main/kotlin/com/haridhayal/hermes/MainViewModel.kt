@@ -23,6 +23,7 @@ import com.haridhayal.hermes.core.model.SessionDto
 import com.haridhayal.hermes.core.model.SkillsResponse
 import com.haridhayal.hermes.core.model.StreamEventDto
 import com.haridhayal.hermes.core.model.UpdateProjectRequest
+import com.haridhayal.hermes.core.model.recentFirst
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
@@ -94,9 +95,12 @@ internal fun resolveSelection(
 ): ResolvedSelection {
     val project = tree.projects.firstOrNull { it.id == requestedProjectId } ?: tree.projects.firstOrNull()
         ?: return ResolvedSelection(null, null)
-    val projectSessions = tree.sessions.filter { it.projectId == project.id }
+    val projectSessions = tree.sessions.filter { it.projectId == project.id }.recentFirst()
     val session = projectSessions.firstOrNull { it.id == requestedSessionId }
-        ?: projectSessions.firstOrNull { it.id == project.selectedSessionId }
+        ?: project.scheduledSessionId
+            ?.takeIf { project.unreadScheduledCount > 0 }
+            ?.let { scheduledId -> projectSessions.firstOrNull { it.id == scheduledId } }
+        ?: projectSessions.firstOrNull { it.kind == "chat" }
         ?: projectSessions.firstOrNull()
     return ResolvedSelection(project.id, session?.id)
 }
