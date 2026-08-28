@@ -3,27 +3,26 @@ package com.haridhayal.hermes.feature.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
@@ -31,13 +30,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,8 +57,7 @@ internal fun ModelsResponse?.capabilitiesFor(
         ?.asSequence()
         ?.filter { candidate -> provider == null || candidate.slug == provider }
         ?.flatMap { candidate -> candidate.models.asSequence() }
-    val found = candidates
-        ?.firstOrNull { it.id == model }
+    val found = candidates?.firstOrNull { it.id == model }
     return found?.let { ModelCapabilities(reasoning = it.reasoning, fast = it.fast) }
         // The selected model may predate a cached inventory. Keep controls
         // available rather than silently dropping options Hermes accepts.
@@ -78,90 +73,134 @@ internal fun ModelSelectionDto?.reasoningEffort(): String? {
 private fun ModelSelectionDto?.fastEnabled(): Boolean =
     (this?.options?.get("fast") as? JsonPrimitive)?.booleanOrNull == true
 
-private data class ThinkingLevel(
+internal data class ThinkingLevel(
     val value: String?,
     val label: String,
     val hint: String,
 )
 
-private val thinkingLevels = listOf(
-    ThinkingLevel(null, "Off", "answer directly"),
-    ThinkingLevel("low", "Low", "a little"),
-    ThinkingLevel("medium", "Medium", "balanced"),
-    ThinkingLevel("high", "High", "slower, costs more"),
+internal val thinkingLevels = listOf(
+    ThinkingLevel(null, "Off", "Answer directly"),
+    ThinkingLevel("low", "Low", "A little reasoning"),
+    ThinkingLevel("medium", "Medium", "Balanced"),
+    ThinkingLevel("high", "High", "Slower, more thorough"),
 )
+
+internal fun thinkingLabel(effort: String?): String =
+    thinkingLevels.firstOrNull { it.value == effort }?.label ?: effort.orEmpty().ifBlank { "Off" }
+
+@Composable
+internal fun ModelModeChip(
+    label: String,
+    pinned: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilterChip(
+        selected = pinned,
+        onClick = onClick,
+        modifier = modifier,
+        label = {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        leadingIcon = {
+            Icon(
+                Icons.Outlined.Memory,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        },
+        trailingIcon = {
+            Icon(
+                Icons.Outlined.ArrowDropDown,
+                contentDescription = "Choose model",
+                modifier = Modifier.size(18.dp),
+            )
+        },
+    )
+}
 
 @Composable
 internal fun ThinkingModeChip(
     effort: String?,
-    onChange: (String?) -> Unit,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier) {
-        TextButton(
-            onClick = { expanded = true },
-            modifier = Modifier.height(40.dp),
-            contentPadding = PaddingValues(horizontal = 7.dp),
-            colors = ButtonDefaults.textButtonColors(
-                contentColor = if (effort == null) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-            ),
-        ) {
+    FilterChip(
+        selected = effort != null,
+        onClick = onClick,
+        modifier = modifier,
+        label = { Text(thinkingLabel(effort), maxLines = 1) },
+        leadingIcon = {
             Icon(
                 Icons.Outlined.AutoAwesome,
                 contentDescription = null,
-                modifier = Modifier.size(15.dp),
+                modifier = Modifier.size(18.dp),
             )
-            Text(
-                text = when (effort) {
-                    null -> "off"
-                    "medium" -> "med"
-                    else -> effort
-                },
-                modifier = Modifier.padding(start = 4.dp),
-                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+        },
+        trailingIcon = {
+            Icon(
+                Icons.Outlined.ArrowDropDown,
+                contentDescription = "Choose thinking effort",
+                modifier = Modifier.size(18.dp),
             )
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ThinkingPickerSheet(
+    effort: String?,
+    onDismiss: () -> Unit,
+    onSelect: (String?) -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(bottom = 28.dp),
         ) {
-            Text(
-                text = "How hard the model reasons before answering.",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            thinkingLevels.forEach { level ->
-                DropdownMenuItem(
-                    text = {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(level.label, modifier = Modifier.weight(1f))
-                            Text(
-                                level.hint,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
+            item {
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            "Thinking",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
                     },
-                    leadingIcon = {
+                    supportingContent = {
+                        Text("How hard the model reasons before answering.")
+                    },
+                    leadingContent = {
+                        Icon(
+                            Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+            items(thinkingLevels, key = { it.value ?: "off" }) { level ->
+                ListItem(
+                    headlineContent = { Text(level.label) },
+                    supportingContent = { Text(level.hint) },
+                    leadingContent = {
                         RadioButton(
                             selected = effort == level.value,
                             onClick = null,
-                            modifier = Modifier.size(20.dp),
                         )
                     },
-                    onClick = {
-                        onChange(level.value)
-                        expanded = false
+                    modifier = Modifier.clickable {
+                        onSelect(level.value)
+                        onDismiss()
                     },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
             }
         }
@@ -192,27 +231,27 @@ internal fun ModelPickerSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.9f),
-            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 28.dp),
+            contentPadding = PaddingValues(bottom = 28.dp),
         ) {
             item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Memory,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        "Model",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            "Model",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    },
+                    supportingContent = { Text("Choose the model used for this project.") },
+                    leadingContent = {
+                        Icon(
+                            Icons.Outlined.Memory,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
             }
             item {
                 ModelRow(
@@ -227,7 +266,7 @@ internal fun ModelPickerSheet(
             item {
                 Text(
                     text = "Follows the gateway unless you pin a model below.",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -236,11 +275,11 @@ internal fun ModelPickerSheet(
             if (models == null) {
                 item {
                     Row(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(24.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         Text("Loading models…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -248,7 +287,7 @@ internal fun ModelPickerSheet(
                 item {
                     Text(
                         "Hermes didn’t return a model catalogue. Gateway default is still available.",
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(24.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -258,7 +297,7 @@ internal fun ModelPickerSheet(
             models?.providers?.forEach { provider ->
                 item(key = "provider:${provider.slug}") {
                     Row(
-                        modifier = Modifier.padding(start = 16.dp, top = 18.dp, end = 16.dp, bottom = 4.dp),
+                        modifier = Modifier.padding(start = 24.dp, top = 20.dp, end = 24.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -289,7 +328,7 @@ internal fun ModelPickerSheet(
                     item(key = "warning:${provider.slug}") {
                         Text(
                             warning,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -320,27 +359,18 @@ internal fun ModelPickerSheet(
             if (capabilities.fast) {
                 item {
                     HorizontalDivider(Modifier.padding(top = 16.dp, bottom = 4.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onFastChange(!selection.fastEnabled()) }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Fast mode", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Priority processing when supported",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelSmall,
+                    ListItem(
+                        headlineContent = { Text("Fast mode") },
+                        supportingContent = { Text("Priority processing when supported") },
+                        trailingContent = {
+                            Switch(
+                                checked = selection.fastEnabled(),
+                                onCheckedChange = onFastChange,
                             )
-                        }
-                        Switch(
-                            checked = selection.fastEnabled(),
-                            onCheckedChange = onFastChange,
-                        )
-                    }
+                        },
+                        modifier = Modifier.clickable { onFastChange(!selection.fastEnabled()) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
                 }
             }
 
@@ -348,17 +378,18 @@ internal fun ModelPickerSheet(
                 TextButton(
                     onClick = onRefresh,
                     enabled = !refreshing,
-                    modifier = Modifier.padding(top = 12.dp),
+                    modifier = Modifier.padding(start = 12.dp, top = 12.dp),
                 ) {
                     if (refreshing) {
                         CircularProgressIndicator(
-                            modifier = Modifier
-                                .size(16.dp)
-                                .padding(end = 4.dp),
+                            modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
                         )
                     }
-                    Text(if (refreshing) "Refreshing…" else "Refresh from Hermes")
+                    Text(
+                        text = if (refreshing) "Refreshing…" else "Refresh from Hermes",
+                        modifier = Modifier.padding(start = if (refreshing) 8.dp else 0.dp),
+                    )
                 }
             }
         }
@@ -375,47 +406,52 @@ private fun ModelRow(
     badge: String? = null,
     mono: Boolean = false,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(if (enabled) 1f else 0.45f)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        RadioButton(selected = selected, onClick = null, enabled = enabled)
-        Column(Modifier.weight(1f)) {
+    ListItem(
+        headlineContent = {
             Text(
                 text = title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium.copy(
+                style = MaterialTheme.typography.bodyLarge.copy(
                     fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
                 ),
             )
-            subtitle?.let {
+        },
+        supportingContent = subtitle?.let { value ->
+            {
                 Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = value,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        leadingContent = {
+            RadioButton(
+                selected = selected,
+                onClick = null,
+                enabled = enabled,
+            )
+        },
+        trailingContent = badge?.let { value ->
+            {
+                Text(
+                    text = value,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .background(
+                            MaterialTheme.colorScheme.surfaceContainerHighest,
+                            MaterialTheme.shapes.small,
+                        )
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
-        }
-        badge?.let {
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .background(
-                        MaterialTheme.colorScheme.surfaceContainerHighest,
-                        MaterialTheme.shapes.small,
-                    )
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
-    }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.45f)
+            .clickable(enabled = enabled, onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
 }

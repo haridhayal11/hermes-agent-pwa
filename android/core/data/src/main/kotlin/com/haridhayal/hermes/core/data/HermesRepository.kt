@@ -1,5 +1,6 @@
 package com.haridhayal.hermes.core.data
 
+import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import androidx.work.Constraints
@@ -190,6 +191,7 @@ class HermesRepository @Inject constructor(
                 ScheduledReplyRequest(deliveryId, text, uploaded),
                 requestId,
             )
+            releaseOwnedCameraCaptures(uris)
             refreshAll()
             result
         } finally {
@@ -353,6 +355,7 @@ class HermesRepository @Inject constructor(
                 )
             },
         )
+        releaseOwnedCameraCaptures(uris)
         scheduleOutbox(sessionId)
         promptId
     }
@@ -470,8 +473,33 @@ class HermesRepository @Inject constructor(
         workManager.enqueueUniqueWork("hermes-outbox-$sessionId", ExistingWorkPolicy.APPEND_OR_REPLACE, request)
     }
 
+    private fun releaseOwnedCameraCaptures(uris: List<Uri>) {
+        uris.filter { isOwnedCameraCaptureUri(context.packageName, it) }.forEach { uri ->
+            runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+    }
+
     private fun clearCacheFiles() {
         File(context.noBackupFilesDir, "outbox").deleteRecursively()
         File(context.cacheDir, "media").deleteRecursively()
+        File(context.cacheDir, "camera-captures").deleteRecursively()
     }
 }
+
+internal fun isOwnedCameraCaptureUri(packageName: String, uri: Uri): Boolean =
+    isOwnedCameraCaptureLocation(
+        packageName = packageName,
+        scheme = uri.scheme,
+        authority = uri.authority,
+        root = uri.pathSegments.firstOrNull(),
+    )
+
+internal fun isOwnedCameraCaptureLocation(
+    packageName: String,
+    scheme: String?,
+    authority: String?,
+    root: String?,
+): Boolean =
+    scheme == ContentResolver.SCHEME_CONTENT &&
+        authority == "$packageName.fileprovider" &&
+        root == "camera-captures"

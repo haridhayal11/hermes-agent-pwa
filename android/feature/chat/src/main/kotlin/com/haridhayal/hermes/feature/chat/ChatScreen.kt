@@ -1,7 +1,9 @@
 package com.haridhayal.hermes.feature.chat
 
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,9 +43,9 @@ import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -70,6 +72,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +89,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -105,13 +109,16 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
-    title: String,
+    projectName: String,
+    sessionTitle: String,
     agentName: String,
     preferences: DevicePreferences,
     modelSelection: ModelSelectionDto?,
@@ -143,17 +150,31 @@ fun ChatScreen(
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var modelPickerOpen by remember { mutableStateOf(false) }
-    var renamedTitle by remember(title) { mutableStateOf(title) }
+    var thinkingPickerOpen by remember { mutableStateOf(false) }
+    var renamedTitle by remember(sessionTitle) { mutableStateOf(sessionTitle) }
+    var pendingCaptureUri by rememberSaveable { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
     val images = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(8)) {
         attachments = attachments + it
     }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {
         attachments = attachments + it
     }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
+        val uri = pendingCaptureUri?.let(Uri::parse)
+        pendingCaptureUri = null
+        if (captured && uri != null) {
+            attachments = attachments + uri
+        } else if (uri != null) {
+            scope.launch(Dispatchers.IO) { CameraCaptureStore.delete(context, uri) }
+        }
+    }
     val colors = composerColors()
-    val context = LocalContext.current
-    val haptics = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
+    LaunchedEffect(context) {
+        withContext(Dispatchers.IO) { CameraCaptureStore.prune(context) }
+    }
     val reduceMotion = preferences.reducedMotion || remember(context) {
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
     }
@@ -270,12 +291,23 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            projectName,
+                            modifier = Modifier.testTag("project-title"),
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            sessionTitle,
+                            modifier = Modifier.testTag("session-title"),
+                            color = colors.muted,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 },
                 navigationIcon = { IconButton(onClick = onMenu) { Icon(Icons.Outlined.Menu, "Open navigation") } },
                 actions = {
@@ -342,7 +374,7 @@ fun ChatScreen(
                 ChatComposer(
                     text = text,
                     attachments = attachments,
-                    modelLabel = modelSelection?.model ?: "default",
+                    modelLabel = modelSelection?.model ?: "Default",
                     modelPinned = modelSelection?.model != null,
                     supportsThinking = modelCapabilities.reasoning,
                     thinkingEffort = modelSelection.reasoningEffort(),
@@ -360,12 +392,49 @@ fun ChatScreen(
                         )
                     },
                     onChooseFiles = { files.launch(arrayOf("*/*")) },
-                    onRemoveAttachment = { index -> attachments = attachments.filterIndexed { at, _ -> at != index } },
+                    onTakePhoto = {
+                        if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
+                            Toast.makeText(context, "Camera unavailable", Toast.LENGTH_SHORT).show()
+                        } else {
+                            runCatching { CameraCaptureStore.createDestination(context) }
+                                .onSuccess { uri ->
+                                    pendingCaptureUri = uri.toString()
+                                    runCatching { camera.launch(uri) }
+                                        .onFailure {
+                                            pendingCaptureUri = null
+                                            scope.launch(Dispatchers.IO) {
+                                                CameraCaptureStore.delete(context, uri)
+                                            }
+                                            Toast.makeText(
+                                                context,
+                                                "Couldn’t open the camera",
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        }
+                                }
+                                .onFailure {
+                                    Toast.makeText(
+                                        context,
+                                        "Couldn’t prepare a photo",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                        }
+                    },
+                    onRemoveAttachment = { index ->
+                        val removed = attachments.getOrNull(index)
+                        attachments = attachments.filterIndexed { at, _ -> at != index }
+                        if (removed != null) {
+                            scope.launch(Dispatchers.IO) {
+                                CameraCaptureStore.delete(context, removed)
+                            }
+                        }
+                    },
                     onPickModel = {
                         modelPickerOpen = true
                         if (models == null) onRefreshModels()
                     },
-                    onThinkingChange = onThinkingChange,
+                    onPickThinking = { thinkingPickerOpen = true },
                     onStop = onStop,
                     onSend = {
                         if (preferences.haptics) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -466,9 +535,19 @@ fun ChatScreen(
             models = models,
             refreshing = modelsRefreshing,
             onDismiss = { modelPickerOpen = false },
-            onSelect = onSelectModel,
+            onSelect = { provider, model ->
+                onSelectModel(provider, model)
+                modelPickerOpen = false
+            },
             onFastChange = onFastChange,
             onRefresh = onRefreshModels,
+        )
+    }
+    if (thinkingPickerOpen) {
+        ThinkingPickerSheet(
+            effort = modelSelection.reasoningEffort(),
+            onDismiss = { thinkingPickerOpen = false },
+            onSelect = onThinkingChange,
         )
     }
 }
@@ -596,9 +675,10 @@ private fun ChatComposer(
     onTextChange: (String) -> Unit,
     onChooseImages: () -> Unit,
     onChooseFiles: () -> Unit,
+    onTakePhoto: () -> Unit,
     onRemoveAttachment: (Int) -> Unit,
     onPickModel: () -> Unit,
-    onThinkingChange: (String?) -> Unit,
+    onPickThinking: () -> Unit,
     onStop: () -> Unit,
     onSend: () -> Unit,
 ) {
@@ -731,42 +811,43 @@ private fun ChatComposer(
                         }
                     }
 
+                    IconButton(
+                        onClick = onTakePhoto,
+                        enabled = enabled,
+                        modifier = Modifier.size(40.dp),
+                        colors = IconButtonDefaults.iconButtonColors(contentColor = colors.muted),
+                    ) {
+                        Icon(
+                            Icons.Outlined.PhotoCamera,
+                            contentDescription = "Take a photo",
+                            modifier = Modifier.size(19.dp),
+                        )
+                    }
+
                     if (showModelControls) {
                         Row(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable(onClickLabel = "Choose model", onClick = onPickModel)
-                                .padding(horizontal = 8.dp),
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Icon(
-                                Icons.Outlined.Memory,
-                                contentDescription = null,
-                                tint = if (modelPinned) colors.action else colors.muted,
-                                modifier = Modifier.size(14.dp),
+                            ModelModeChip(
+                                label = modelLabel,
+                                pinned = modelPinned,
+                                onClick = onPickModel,
+                                modifier = Modifier.widthIn(max = 180.dp),
                             )
-                            Text(
-                                text = modelLabel,
-                                color = if (modelPinned) colors.ink else colors.muted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                ),
-                            )
+                            if (supportsThinking) {
+                                ThinkingModeChip(
+                                    effort = thinkingEffort,
+                                    onClick = onPickThinking,
+                                )
+                            }
                         }
                     } else {
                         Spacer(Modifier.weight(1f))
-                    }
-
-                    if (showModelControls && supportsThinking) {
-                        ThinkingModeChip(
-                            effort = thinkingEffort,
-                            onChange = onThinkingChange,
-                        )
                     }
 
                     if (showModelControls && running) {

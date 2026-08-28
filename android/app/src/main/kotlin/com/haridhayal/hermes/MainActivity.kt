@@ -287,7 +287,8 @@ private fun HermesApp(
             entryProvider = entryProvider {
                 entry<ChatRoute> {
                     ChatScreen(
-                        title = state.selectedSession?.title ?: "Hermes",
+                        projectName = state.selectedProject?.name ?: "Hermes",
+                        sessionTitle = state.selectedSession?.title ?: "Chat",
                         agentName = sharedAgentName,
                         preferences = preferences,
                         modelSelection = state.selectedProject?.modelSelection,

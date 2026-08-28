@@ -8,6 +8,7 @@ import com.haridhayal.hermes.core.model.ModelsResponse
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class ModelControlsTest {
@@ -42,5 +43,32 @@ class ModelControlsTest {
         )
 
         assertEquals("high", selection.reasoningEffort())
+    }
+
+    @Test
+    fun thinkingLabelsCoverEveryNativeChoice() {
+        assertEquals(
+            listOf("Off", "Low", "Medium", "High"),
+            thinkingLevels.map { thinkingLabel(it.value) },
+        )
+    }
+
+    @Test
+    fun gatewayDefaultUsesTheCurrentModelsCapabilities() {
+        val models = ModelsResponse(
+            providers = listOf(
+                ModelProviderDto(
+                    slug = "gateway",
+                    name = "Gateway",
+                    models = listOf(ModelChoiceDto("current", reasoning = true)),
+                ),
+            ),
+            current = CurrentModelDto("current", "gateway"),
+        )
+
+        val effective = models.capabilitiesFor(models.current.model, models.current.provider)
+
+        assertEquals(ModelCapabilities(reasoning = true, fast = false), effective)
+        assertFalse(models.capabilitiesFor(null).reasoning)
     }
 }
