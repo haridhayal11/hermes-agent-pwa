@@ -9,13 +9,13 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface HermesDao {
-    @Query("SELECT * FROM projects ORDER BY lastActiveAt DESC")
+    @Query("SELECT * FROM projects ORDER BY lastActiveAt DESC, id ASC")
     fun observeProjects(): Flow<List<ProjectEntity>>
 
-    @Query("SELECT * FROM sessions WHERE projectId = :projectId ORDER BY lastActiveAt DESC")
+    @Query("SELECT * FROM sessions WHERE projectId = :projectId ORDER BY lastActiveAt DESC, id ASC")
     fun observeSessions(projectId: String): Flow<List<SessionEntity>>
 
-    @Query("SELECT * FROM sessions ORDER BY lastActiveAt DESC")
+    @Query("SELECT * FROM sessions ORDER BY lastActiveAt DESC, id ASC")
     fun observeAllSessions(): Flow<List<SessionEntity>>
 
     @Query("SELECT * FROM messages WHERE sessionId = :sessionId ORDER BY ordinal")

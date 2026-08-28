@@ -7,6 +7,7 @@ import {
   IconPlus,
 } from "@/components/primitives/icons";
 import type { Project, ProjectSession } from "@/lib/chat-types";
+import { sessionsRecentFirst } from "@/lib/session-order";
 
 function SessionBranch({
   session,
@@ -110,14 +111,16 @@ export function ProjectSidebar({
       rows.push(session);
       map.set(session.project_id, rows);
     }
+    for (const [projectId, rows] of map) {
+      map.set(projectId, sessionsRecentFirst(rows));
+    }
     return map;
   }, [sessions]);
 
-  async function select(session: ProjectSession) {
-    await fetch(
-      `/api/projects/${session.project_id}/sessions/${session.session_id}/select`,
-      { method: "POST" },
-    );
+  function select(session: ProjectSession) {
+    // The URL contains the durable ID, so duplicate display titles can never
+    // influence which conversation wins a navigation race. The mounted page
+    // records the project's fallback after this local navigation succeeds.
     router.push(`/p/${session.project_id}/s/${session.session_id}`);
     onClose();
   }

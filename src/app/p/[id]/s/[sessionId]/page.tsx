@@ -41,7 +41,7 @@ export default async function SessionPage({
       `SELECT ps.* FROM project_sessions ps
        JOIN projects p ON p.id = ps.project_id
        WHERE ps.archived = 0 AND p.archived = 0
-       ORDER BY CASE ps.kind WHEN 'scheduled' THEN 0 ELSE 1 END, ps.created_at ASC`,
+       ORDER BY ps.last_active_at DESC, ps.created_at DESC, ps.session_id ASC`,
     )
     .all() as ProjectSession[];
 

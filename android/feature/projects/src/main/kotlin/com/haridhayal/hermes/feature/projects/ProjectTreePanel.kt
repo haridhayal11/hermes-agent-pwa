@@ -26,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.haridhayal.hermes.core.model.ProjectDto
 import com.haridhayal.hermes.core.model.SessionDto
+import com.haridhayal.hermes.core.model.recentFirst
 
 @Composable
 fun ProjectTreePanel(
@@ -64,7 +66,7 @@ fun ProjectTreePanel(
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             projects.filterNot { it.archived }.forEach { project ->
-                val projectSessions = sessions.filter { it.projectId == project.id }
+                val projectSessions = sessions.filter { it.projectId == project.id }.recentFirst()
                 val open = expanded[project.id] ?: projectSessions.any { it.id == selectedSessionId }
                 Surface(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -105,19 +107,18 @@ fun ProjectTreePanel(
                         }
                         if (open) {
                             val byParent = projectSessions.groupBy { it.parentSessionId }
-                            byParent[null]
-                                .orEmpty()
-                                .sortedBy { if (it.kind == "scheduled") 0 else 1 }
-                                .forEach { session ->
-                                SessionRow(
-                                    project,
-                                    session,
-                                    byParent,
-                                    selectedSessionId,
-                                    0,
-                                    project.unreadScheduledCount,
-                                    onSelect,
-                                )
+                            byParent[null].orEmpty().forEach { session ->
+                                key(session.id) {
+                                    SessionRow(
+                                        project,
+                                        session,
+                                        byParent,
+                                        selectedSessionId,
+                                        0,
+                                        project.unreadScheduledCount,
+                                        onSelect,
+                                    )
+                                }
                             }
                         }
                     }
@@ -173,8 +174,10 @@ private fun SessionRow(
         onClick = { onSelect(project, session) },
         modifier = Modifier.padding(start = (12 * depth).dp),
     )
-    children[session.id].orEmpty().forEach {
-        SessionRow(project, it, children, selectedSessionId, depth + 1, unreadScheduledCount, onSelect)
+    children[session.id].orEmpty().forEach { child ->
+        key(child.id) {
+            SessionRow(project, child, children, selectedSessionId, depth + 1, unreadScheduledCount, onSelect)
+        }
     }
 }
 

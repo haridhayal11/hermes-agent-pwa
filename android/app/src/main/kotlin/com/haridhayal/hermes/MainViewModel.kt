@@ -43,6 +43,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -127,6 +129,7 @@ class MainViewModel @Inject constructor(
     private val events = MutableStateFlow<List<StreamEventDto>>(emptyList())
     private val run = MutableStateFlow<Pair<String?, Boolean>>(null to false)
     private val streamRevision = MutableStateFlow(0L)
+    private val selectionSync = Mutex()
     private var searchJob: Job? = null
     private var nextErrorId = 0L
 
@@ -287,14 +290,25 @@ class MainViewModel @Inject constructor(
         repository.pair(host, code, deviceName, BuildConfig.DEBUG)
     }
 
-    fun select(project: ProjectDto, session: SessionDto) = launchAction {
-        repository.selectSession(project.id, session.id)
+    fun select(project: ProjectDto, session: SessionDto) {
         updateSelection(project.id, session.id)
+        syncSelection()
     }
 
-    fun open(projectId: String, sessionId: String) = launchAction {
-        repository.selectSession(projectId, sessionId)
+    fun open(projectId: String, sessionId: String) {
         updateSelection(projectId, sessionId)
+        syncSelection()
+    }
+
+    private fun syncSelection() = launchAction {
+        selectionSync.withLock {
+            // Read after acquiring the lock. If several same-titled rows are
+            // tapped quickly, every queued sync converges on the last ID the
+            // user chose instead of letting network completion order decide.
+            val projectId = selectedProjectId.value ?: return@withLock
+            val sessionId = selectedSessionId.value ?: return@withLock
+            repository.selectSession(projectId, sessionId)
+        }
     }
 
     fun openProject(project: ProjectDto) = launchAction {

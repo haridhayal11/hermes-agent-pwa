@@ -37,7 +37,7 @@ export function listProjectSessions(
     .prepare(
       `SELECT * FROM project_sessions
         WHERE project_id = ? ${includeArchived ? "" : "AND archived = 0"}
-        ORDER BY CASE kind WHEN 'scheduled' THEN 0 ELSE 1 END, created_at ASC`,
+        ORDER BY last_active_at DESC, created_at DESC, session_id ASC`,
     )
     .all(projectId) as ProjectSessionRow[];
 }
