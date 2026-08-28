@@ -42,7 +42,7 @@ Run all of these before asking the user anything. Report the whole set at once
 rather than stopping at the first failure.
 
 ```bash
-node -v                     # must be >= 20.9 — Next 16 requires it
+node -v                     # must be >= 22 — required by Firebase Admin
 pnpm -v                     # any recent version; `npm i -g pnpm` if missing
 uname -s                    # Linux → systemd path. Darwin → launchd, see Step 5
 tailscale status            # must print a tailnet; the app needs HTTPS
@@ -144,6 +144,8 @@ HERMES_CRON_DIR=/home/<gateway user>/.hermes/cron
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=
+FIREBASE_PROJECT_ID=
+GOOGLE_APPLICATION_CREDENTIALS=
 ```
 
 If the user wanted push, generate the pair and paste both in:
@@ -151,6 +153,13 @@ If the user wanted push, generate the pair and paste both in:
 ```bash
 npx web-push generate-vapid-keys
 ```
+
+Android push is optional and independent of Web Push. To enable it, create a
+Firebase service account outside the repository, set `FIREBASE_PROJECT_ID`,
+and make Application Default Credentials available to the service (commonly by
+setting `GOOGLE_APPLICATION_CREDENTIALS` to that file). Build the APK with the
+matching ignored `android/app/google-services.json`. Leaving this unset keeps
+Web Push working and Settings reports native notifications as unavailable.
 
 Then build. Build failures here are real — do not proceed past one.
 
@@ -304,6 +313,7 @@ Worth telling them, because it is the difference between this and a chat app:
 | Notifications work on Chrome, silently do nothing on iOS | `VAPID_SUBJECT` is not a routable URL — Apple returns `403 BadJwtToken` | Set a real `mailto:`/`https:` URL, restart |
 | Test notification returns `{"sent":0}` with no error | Nothing is subscribed on this device | Enable notifications in Settings first |
 | Notification permission cannot be granted | The app is not on the home screen | Add to Home Screen, then ask again |
+| Android Notifications says unavailable | The server lacks `FIREBASE_PROJECT_ID`, or the APK was built without `android/app/google-services.json` | Configure the matching Firebase project and rebuild the APK |
 | Model picker, Steer or Toolsets missing | The gateway does not advertise the capability | Upgrade Hermes; the app hides rather than 404s, by design |
 | Scheduled jobs never reach a project | `HERMES_CRON_DIR` wrong, or unreadable by the service user | Hermes creates it `0700`; fix the path or the permissions |
 | `/api/jobs` returns 501 | The gateway has no cron module | Nothing to fix; the Scheduled section stays empty |

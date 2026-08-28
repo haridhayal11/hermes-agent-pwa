@@ -2,8 +2,22 @@ package com.haridhayal.hermes.core.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 
 enum class ThemePreference { System, Light, Dark }
 
@@ -48,7 +62,8 @@ data class PairingClaimResponse(
 
 @Serializable
 data class ModelSelectionDto(
-    val model: String,
+    /** null follows the gateway default while still allowing per-run options. */
+    val model: String? = null,
     val provider: String? = null,
     val options: JsonObject? = null,
 )
@@ -66,11 +81,18 @@ data class ProjectDto(
     val modelSelection: ModelSelectionDto? = null,
     val activeSessionId: String? = null,
     @Deprecated("Use activeSessionId") val sessionId: String? = null,
+    val lastChatSessionId: String? = null,
+    val scheduledSessionId: String? = null,
+    val unreadScheduledCount: Int = 0,
     val createdAt: Long,
     val lastActiveAt: Long,
     val archived: Boolean = false,
 ) {
-    val selectedSessionId: String get() = activeSessionId ?: sessionId.orEmpty()
+    val selectedSessionId: String get() = when {
+        unreadScheduledCount > 0 && scheduledSessionId != null -> scheduledSessionId
+        lastChatSessionId != null -> lastChatSessionId
+        else -> activeSessionId ?: sessionId.orEmpty()
+    }
 }
 
 @Serializable
@@ -113,6 +135,7 @@ data class SessionDto(
     val createdAt: Long,
     val lastActiveAt: Long,
     val archived: Boolean = false,
+    val kind: String = "chat",
 )
 
 @Serializable
@@ -134,13 +157,52 @@ data class CreateSessionRequest(val title: String = "New chat")
 data class RenameSessionRequest(val title: String)
 
 @Serializable
+data class OpenProjectResponse(
+    val session: SessionDto,
+    val sessionId: String,
+)
+
+@Serializable
+data class ScheduledReadResponse(
+    val ok: Boolean = true,
+    val markedRead: Int = 0,
+)
+
+@Serializable
 data class MessageDto(
+    @Serializable(with = NullableStringOrNumberSerializer::class)
     val id: String? = null,
     val role: String,
     val content: String? = null,
     val timestamp: JsonElement? = null,
     val cron: JsonObject? = null,
 )
+
+object NullableStringOrNumberSerializer : KSerializer<String?> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("NullableStringOrNumber", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): String? {
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: throw SerializationException("Message ids require JSON decoding")
+        return when (val value = jsonDecoder.decodeJsonElement()) {
+            JsonNull -> null
+            is JsonPrimitive -> when {
+                value.isString -> value.content
+                value.booleanOrNull != null -> throw SerializationException("Message id cannot be a boolean")
+                value.longOrNull != null || value.doubleOrNull != null -> value.content
+                else -> throw SerializationException("Message id must be a string or number")
+            }
+            else -> throw SerializationException("Message id must be a string or number")
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        val jsonEncoder = encoder as? JsonEncoder
+            ?: throw SerializationException("Message ids require JSON encoding")
+        jsonEncoder.encodeJsonElement(value?.let(::JsonPrimitive) ?: JsonNull)
+    }
+}
 
 @Serializable
 data class MessagePage(
@@ -171,6 +233,22 @@ data class SendResult(
     val mode: String,
     val runId: String,
     val sessionId: String? = null,
+)
+
+@Serializable
+data class ScheduledReplyRequest(
+    val deliveryId: String,
+    val text: String,
+    val attachments: List<AttachmentDto> = emptyList(),
+)
+
+@Serializable
+data class ScheduledReplyResult(
+    val session: SessionDto,
+    val queued: Boolean,
+    val mode: String,
+    val runId: String,
+    val startupError: String? = null,
 )
 
 @Serializable
@@ -237,15 +315,124 @@ data class SearchResponse(
 )
 
 @Serializable
-data class CatalogResponse(
-    val models: JsonObject? = null,
-    val skills: List<JsonObject> = emptyList(),
-    val toolsets: List<JsonObject> = emptyList(),
+data class ModelChoiceDto(
+    val id: String,
+    val fast: Boolean = false,
+    val reasoning: Boolean = false,
+    val featured: Boolean = false,
+)
+
+@Serializable
+data class ModelProviderDto(
+    val slug: String,
+    val name: String,
+    val authenticated: Boolean = true,
+    val warning: String? = null,
+    val isCurrent: Boolean = false,
+    val models: List<ModelChoiceDto> = emptyList(),
+)
+
+@Serializable
+data class CurrentModelDto(val model: String? = null, val provider: String? = null)
+
+@Serializable
+data class ModelsResponse(
+    val providers: List<ModelProviderDto> = emptyList(),
+    val current: CurrentModelDto = CurrentModelDto(),
     val unavailable: Boolean = false,
 )
 
 @Serializable
-data class JobsResponse(val jobs: List<JsonObject> = emptyList(), val unavailable: Boolean = false)
+data class SkillDto(
+    val name: String,
+    val description: String? = null,
+    val category: String? = null,
+)
+
+@Serializable
+data class SkillsResponse(
+    val skills: List<SkillDto> = emptyList(),
+    val unavailable: Boolean = false,
+)
+
+@Serializable
+data class ToolsetDto(
+    val name: String,
+    val label: String? = null,
+    val description: String? = null,
+    val enabled: Boolean = false,
+    val configured: Boolean? = null,
+    val tools: List<String> = emptyList(),
+)
+
+@Serializable
+data class ToolsetsResponse(
+    val toolsets: List<ToolsetDto> = emptyList(),
+    val unavailable: Boolean = false,
+)
+
+data class CatalogSummary(
+    val models: String = "Loading…",
+    val skills: String = "Loading…",
+    val toolsets: String = "Loading…",
+)
+
+@Serializable
+data class JobScheduleDto(
+    val kind: String = "",
+    val display: String? = null,
+    @SerialName("run_at") val runAt: String? = null,
+    val minutes: Int? = null,
+    val expr: String? = null,
+)
+
+@Serializable
+data class JobBindingDto(
+    @SerialName("job_id") val jobId: String? = null,
+    @SerialName("project_id") val projectId: String,
+    @SerialName("project_name") val projectName: String? = null,
+)
+
+@Serializable
+data class JobRepeatDto(
+    val times: Int? = null,
+    val completed: Int = 0,
+)
+
+@Serializable
+data class JobDto(
+    val id: String,
+    val name: String,
+    val enabled: Boolean = true,
+    val state: String = "",
+    val schedule: JobScheduleDto = JobScheduleDto(),
+    @SerialName("schedule_display") val scheduleDisplay: String = "",
+    @SerialName("next_run_at") val nextRunAt: String? = null,
+    @SerialName("last_status") val lastStatus: String? = null,
+    @SerialName("last_error") val lastError: String? = null,
+    val prompt: String = "",
+    val deliver: String = "local",
+    val skills: List<String> = emptyList(),
+    val repeat: JobRepeatDto? = null,
+    val binding: JobBindingDto? = null,
+)
+
+@Serializable
+data class JobsResponse(val jobs: List<JobDto> = emptyList(), val unavailable: Boolean = false)
+
+@Serializable
+data class JobWriteRequest(
+    val name: String,
+    val schedule: String,
+    val prompt: String,
+    val deliver: String,
+    val skills: List<String> = emptyList(),
+    val repeat: Int? = null,
+    val binding: JobBindingDto? = null,
+)
+
+@Serializable
+data class JobResponse(val job: JobDto)
 
 @Serializable
 data class AgentNameResponse(val name: String, val max: Int? = null)
@@ -257,6 +444,58 @@ data class AgentNameRequest(val name: String)
 data class StatusResponse(
     val hermes: JsonObject,
     @SerialName("active_runs") val activeRuns: List<JsonObject> = emptyList(),
+)
+
+@Serializable
+enum class NotificationKind {
+    @SerialName("run") Run,
+    @SerialName("approval") Approval,
+    @SerialName("question") Question,
+    @SerialName("job") Job,
+    @SerialName("job-failed") JobFailed,
+}
+
+@Serializable
+data class NotificationSettingsDto(
+    val configured: Boolean = false,
+    val enabled: Boolean = false,
+    val kinds: List<NotificationKind> = NotificationKind.entries,
+    val subscriptions: Int = 0,
+)
+
+@Serializable
+data class NotificationRegistrationRequest(
+    val installationId: String,
+    val kinds: List<NotificationKind> = NotificationKind.entries,
+)
+
+@Serializable
+data class NotificationKindsRequest(val kinds: List<NotificationKind>)
+
+@Serializable
+data class NotificationSendResult(
+    val sent: Int = 0,
+    val failed: Int = 0,
+    val error: String? = null,
+)
+
+@Serializable
+data class MaintenanceStatusDto(
+    val dbPath: String = "",
+    val dbBytes: Long = 0,
+    val projects: Int = 0,
+    val archivedProjects: Int = 0,
+    val runs: Int = 0,
+    val runEvents: Int = 0,
+    val queued: Int = 0,
+    val pushSubscriptions: Int = 0,
+    val hermesUrl: String = "",
+)
+
+@Serializable
+data class MaintenanceResultDto(
+    val removed: Int = 0,
+    val runEvents: Int = 0,
 )
 
 @Serializable

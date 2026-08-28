@@ -3,4 +3,5 @@ android { namespace = "com.haridhayal.hermes.feature.settings" }
 dependencies {
     implementation(project(":core:model")); implementation(project(":core:data")); implementation(project(":core:designsystem"))
     implementation(platform(libs.compose.bom)); implementation(libs.compose.material3); implementation(libs.compose.ui)
+    testImplementation(libs.junit)
 }

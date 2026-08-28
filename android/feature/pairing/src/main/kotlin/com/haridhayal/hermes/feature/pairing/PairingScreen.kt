@@ -1,18 +1,23 @@
 package com.haridhayal.hermes.feature.pairing
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,57 +46,82 @@ fun PairingScreen(
         focus.clearFocus()
         if (host.isNotBlank() && code.isNotBlank() && deviceName.isNotBlank()) onPair(host, code, deviceName)
     }
-    Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
-        verticalArrangement = Arrangement.Center,
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .systemBarsPadding()
+            .padding(20.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text("Pair with Hermes", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Enter the HTTPS address shown by your Hermes server and a one-time pairing code.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(24.dp))
-        OutlinedTextField(
-            value = host,
-            onValueChange = { host = it },
-            label = { Text("Server URL") },
-            placeholder = { Text("https://hermes.example.com") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = code,
-            onValueChange = { code = it },
-            label = { Text("One-time code") },
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, imeAction = ImeAction.Next),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = deviceName,
-            onValueChange = { deviceName = it.take(80) },
-            label = { Text("Device name") },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { submit() }),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (error != null) {
-            Spacer(Modifier.height(12.dp))
-            Text(error, color = MaterialTheme.colorScheme.error)
-        }
-        Spacer(Modifier.height(20.dp))
-        Button(
-            onClick = submit,
-            enabled = !loading && host.isNotBlank() && code.isNotBlank() && deviceName.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
+        Surface(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 500.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
-            if (loading) CircularProgressIndicator(Modifier.height(20.dp), strokeWidth = 2.dp)
-            else Text("Pair device")
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    "HERMES",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("Pair your device", style = MaterialTheme.typography.headlineMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Enter the HTTPS address shown by your Hermes server and a one-time pairing code.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(24.dp))
+                OutlinedTextField(
+                    value = host,
+                    onValueChange = { host = it },
+                    label = { Text("Server URL") },
+                    placeholder = { Text("https://hermes.example.com") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it },
+                    label = { Text("One-time code") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, imeAction = ImeAction.Next),
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = deviceName,
+                    onValueChange = { deviceName = it.take(80) },
+                    label = { Text("Device name") },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (error != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(error, color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(Modifier.height(20.dp))
+                Button(
+                    onClick = submit,
+                    enabled = !loading && host.isNotBlank() && code.isNotBlank() && deviceName.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    if (loading) CircularProgressIndicator(Modifier.height(20.dp), strokeWidth = 2.dp)
+                    else Text("Pair device")
+                }
+            }
         }
     }
 }

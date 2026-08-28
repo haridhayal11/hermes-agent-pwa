@@ -13,7 +13,7 @@ Pairing and cursor behavior are documented in
 - Android Studio with JDK 17 or newer
 - Android SDK Platform 37 and Build Tools 36.0.0
 - Gradle 9.4.1 (the checked-in wrapper installs it)
-- Application ID `com.haridhayal.hermes`; minimum Android 10 / API 29
+- Application ID `com.haridhayal.hermes`; minimum Android 13 / API 33
 
 Install the SDK packages from Android Studio's SDK Manager, then build:
 
@@ -55,8 +55,15 @@ attachment copies are committed before they appear queued. WorkManager drains
 FIFO within a session and can drain separate sessions concurrently. Media cache
 policy is a global 512 MB LRU and never includes unsent attachment copies.
 
-FCM notifications, receiving content from the Android Sharesheet, speech, and
-`VoiceInteractionService` are deliberately outside this core release.
+Native notifications are optional and use a Firebase project supplied by each
+deployment. Put that project's `google-services.json` at `android/app/` before
+building; the file is ignored by Git. On the host, set `FIREBASE_PROJECT_ID`
+and point `GOOGLE_APPLICATION_CREDENTIALS` at the matching service-account JSON.
+Without either side of that configuration the app still builds and runs, and
+Settings reports notifications as unavailable.
+
+Receiving content from the Android Sharesheet, speech, and
+`VoiceInteractionService` remain outside this release.
 
 ## Release signing
 

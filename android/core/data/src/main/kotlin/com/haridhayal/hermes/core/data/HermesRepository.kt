@@ -20,11 +20,17 @@ import com.haridhayal.hermes.core.database.SyncStateEntity
 import com.haridhayal.hermes.core.model.ConnectionConfig
 import com.haridhayal.hermes.core.model.ChangeEventDto
 import com.haridhayal.hermes.core.model.CreateProjectRequest
+import com.haridhayal.hermes.core.model.JobWriteRequest
 import com.haridhayal.hermes.core.model.LocalAttachment
 import com.haridhayal.hermes.core.model.MessageDto
+import com.haridhayal.hermes.core.model.NotificationKind
+import com.haridhayal.hermes.core.model.NotificationKindsRequest
+import com.haridhayal.hermes.core.model.NotificationRegistrationRequest
 import com.haridhayal.hermes.core.model.PairingClaimRequest
 import com.haridhayal.hermes.core.model.ProjectDto
 import com.haridhayal.hermes.core.model.SearchResponse
+import com.haridhayal.hermes.core.model.ScheduledReplyRequest
+import com.haridhayal.hermes.core.model.ScheduledReplyResult
 import com.haridhayal.hermes.core.model.SendMessageRequest
 import com.haridhayal.hermes.core.model.SessionDto
 import com.haridhayal.hermes.core.model.StreamEventDto
@@ -101,21 +107,22 @@ class HermesRepository @Inject constructor(
         val projects = withContext(Dispatchers.IO) { api.projects(config).projects }
         dao.upsertProjects(projects.map(::projectEntity))
         if (projects.isEmpty()) {
+            dao.clearAllMessages()
+            dao.clearRunCursors()
             dao.clearProjects()
             return
         }
-        dao.removeMissingProjects(projects.map { it.id })
+        dao.removeMissingProjectData(projects.map { it.id })
         projects.forEach { project -> refreshSessions(config, project.id) }
     }
 
     suspend fun refreshSession(projectId: String, sessionId: String) {
         val config = requireConnection()
         val page = withContext(Dispatchers.IO) { api.messages(config, projectId, sessionId) }
-        dao.clearMessages(sessionId)
-        dao.upsertMessages(page.messages.mapIndexed { index, message ->
+        val messages = page.messages.mapIndexed { index, message ->
             MessageEntity(sessionId, index.toLong(), message.id, json.encodeToString(message))
-        })
-        dao.pruneMessages(sessionId)
+        }
+        dao.replaceMessages(sessionId, messages)
     }
 
     suspend fun createProject(request: CreateProjectRequest): ProjectDto {
@@ -132,10 +139,62 @@ class HermesRepository @Inject constructor(
         return result.session
     }
 
-    suspend fun selectSession(projectId: String, sessionId: String) {
-        withContext(Dispatchers.IO) { api.selectSession(requireConnection(), projectId, sessionId) }
+    suspend fun openProject(projectId: String): SessionDto {
+        val result = withContext(Dispatchers.IO) {
+            api.openProject(requireConnection(), projectId)
+        }
         refreshAll()
-        refreshSession(projectId, sessionId)
+        return result.session
+    }
+
+    suspend fun selectSession(projectId: String, sessionId: String) {
+        withContext(Dispatchers.IO) {
+            api.selectSession(requireConnection(), projectId, sessionId)
+        }
+        refreshAll()
+    }
+
+    suspend fun markScheduledRead(projectId: String) {
+        withContext(Dispatchers.IO) {
+            api.markScheduledRead(requireConnection(), projectId)
+        }
+        refreshAll()
+    }
+
+    suspend fun replyScheduled(
+        projectId: String,
+        deliveryId: String,
+        text: String,
+        uris: List<Uri>,
+    ): ScheduledReplyResult = withContext(Dispatchers.IO) {
+        val requestId = UUID.randomUUID().toString()
+        val directory = File(context.noBackupFilesDir, "scheduled-replies/$requestId").apply {
+            mkdirs()
+        }
+        try {
+            val config = requireConnection()
+            val uploaded = uris.mapIndexed { index, uri ->
+                val local = copyAttachment(requestId, index, uri, directory)
+                api.upload(
+                    config,
+                    projectId,
+                    File(local.localPath),
+                    local.mimeType,
+                    local.sha256,
+                    "$requestId:$index",
+                )
+            }
+            val result = api.replyScheduled(
+                config,
+                projectId,
+                ScheduledReplyRequest(deliveryId, text, uploaded),
+                requestId,
+            )
+            refreshAll()
+            result
+        } finally {
+            directory.deleteRecursively()
+        }
     }
 
     suspend fun forkSession(projectId: String, sessionId: String): SessionDto {
@@ -189,16 +248,63 @@ class HermesRepository @Inject constructor(
     }
 
     suspend fun jobs() = withContext(Dispatchers.IO) { api.jobs(requireConnection()) }
+    suspend fun createJob(request: JobWriteRequest) = withContext(Dispatchers.IO) {
+        api.createJob(requireConnection(), request).job
+    }
+    suspend fun updateJob(jobId: String, request: JobWriteRequest) = withContext(Dispatchers.IO) {
+        api.updateJob(requireConnection(), jobId, request).job
+    }
     suspend fun jobAction(jobId: String, action: String) = withContext(Dispatchers.IO) {
         api.jobAction(requireConnection(), jobId, action)
+    }
+    suspend fun deleteJob(jobId: String) = withContext(Dispatchers.IO) {
+        api.deleteJob(requireConnection(), jobId)
     }
     suspend fun models() = withContext(Dispatchers.IO) { api.models(requireConnection()) }
     suspend fun skills() = withContext(Dispatchers.IO) { api.skills(requireConnection()) }
     suspend fun toolsets() = withContext(Dispatchers.IO) { api.toolsets(requireConnection()) }
     suspend fun agentName() = withContext(Dispatchers.IO) { api.agentName(requireConnection()) }
     suspend fun setAgentName(name: String) = withContext(Dispatchers.IO) { api.setAgentName(requireConnection(), name) }
+    suspend fun status() = withContext(Dispatchers.IO) { api.validate(requireConnection()) }
+    suspend fun archivedProjects() = withContext(Dispatchers.IO) {
+        api.projects(requireConnection(), archived = true).projects.filter { it.archived }
+    }
+    suspend fun restoreProject(projectId: String) {
+        withContext(Dispatchers.IO) {
+            api.updateProject(requireConnection(), projectId, UpdateProjectRequest(archived = false))
+        }
+        refreshAll()
+    }
+    suspend fun deleteArchivedProject(projectId: String) {
+        withContext(Dispatchers.IO) {
+            api.deleteProject(requireConnection(), projectId, purge = true, deleteSessions = false)
+        }
+        refreshAll()
+    }
+    suspend fun maintenanceStatus() = withContext(Dispatchers.IO) {
+        api.maintenanceStatus(requireConnection())
+    }
     suspend fun pruneServerHistory(hours: Int = 24) = withContext(Dispatchers.IO) {
         api.maintenance(requireConnection(), hours)
+    }
+    suspend fun notificationSettings() = withContext(Dispatchers.IO) {
+        api.notifications(requireConnection())
+    }
+    suspend fun registerNotifications(installationId: String, kinds: List<NotificationKind>) =
+        withContext(Dispatchers.IO) {
+            api.registerNotifications(
+                requireConnection(),
+                NotificationRegistrationRequest(installationId, kinds),
+            )
+        }
+    suspend fun updateNotificationKinds(kinds: List<NotificationKind>) = withContext(Dispatchers.IO) {
+        api.updateNotificationKinds(requireConnection(), NotificationKindsRequest(kinds))
+    }
+    suspend fun disableNotifications() = withContext(Dispatchers.IO) {
+        api.disableNotifications(requireConnection())
+    }
+    suspend fun testNotifications() = withContext(Dispatchers.IO) {
+        api.testNotifications(requireConnection())
     }
 
     fun requiresPairing(error: Throwable): Boolean =
@@ -251,9 +357,21 @@ class HermesRepository @Inject constructor(
         promptId
     }
 
-    fun sessionEvents(projectId: String, sessionId: String): Flow<StreamEventDto> =
-        kotlinx.coroutines.flow.flow {
-            val cursor = dao.cursor(sessionId)?.let { "${it.runId}:${it.sequence}" }
+    fun sessionEvents(
+        projectId: String,
+        sessionId: String,
+        initialCursor: String? = null,
+    ): Flow<StreamEventDto> {
+        var firstCollection = true
+        return kotlinx.coroutines.flow.flow {
+            // A new screen collector replays the latest run when it has no in-memory
+            // cursor. Network retries of that same collector resume from Room.
+            val cursor = if (firstCollection) {
+                firstCollection = false
+                initialCursor
+            } else {
+                dao.cursor(sessionId)?.let { "${it.runId}:${it.sequence}" }
+            }
             api.sessionEvents(requireConnection(), projectId, sessionId, cursor).collect { event ->
                 val runId = event.runId
                 val sequence = event.sequence
@@ -265,6 +383,7 @@ class HermesRepository @Inject constructor(
                 emit(event)
             }
         }
+    }
 
     suspend fun search(query: String): SearchResponse = withContext(Dispatchers.IO) {
         api.search(requireConnection(), query)
@@ -289,8 +408,7 @@ class HermesRepository @Inject constructor(
 
     private suspend fun refreshSessions(config: ConnectionConfig, projectId: String) {
         val sessions = withContext(Dispatchers.IO) { api.sessions(config, projectId).sessions }
-        dao.upsertSessions(sessions.map(::sessionEntity))
-        if (sessions.isNotEmpty()) dao.removeMissingSessions(projectId, sessions.map { it.id })
+        dao.replaceSessions(projectId, sessions.map(::sessionEntity))
     }
 
     private suspend fun requireConnection(): ConnectionConfig =

@@ -30,6 +30,13 @@ interface HermesDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertMessages(messages: List<MessageEntity>)
 
+    @Transaction
+    suspend fun replaceMessages(sessionId: String, messages: List<MessageEntity>) {
+        clearMessages(sessionId)
+        upsertMessages(messages)
+        pruneMessages(sessionId)
+    }
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertCursor(cursor: RunCursorEntity)
 
@@ -39,8 +46,51 @@ interface HermesDao {
     @Query("DELETE FROM projects WHERE id NOT IN (:ids)")
     suspend fun removeMissingProjects(ids: List<String>)
 
+    @Query("DELETE FROM messages WHERE sessionId IN (SELECT id FROM sessions WHERE projectId NOT IN (:projectIds))")
+    suspend fun clearMessagesForMissingProjects(projectIds: List<String>)
+
+    @Query("DELETE FROM run_cursors WHERE sessionId IN (SELECT id FROM sessions WHERE projectId NOT IN (:projectIds))")
+    suspend fun clearCursorsForMissingProjects(projectIds: List<String>)
+
+    @Transaction
+    suspend fun removeMissingProjectData(projectIds: List<String>) {
+        clearMessagesForMissingProjects(projectIds)
+        clearCursorsForMissingProjects(projectIds)
+        removeMissingProjects(projectIds)
+    }
+
     @Query("DELETE FROM sessions WHERE projectId = :projectId AND id NOT IN (:ids)")
     suspend fun removeMissingSessions(projectId: String, ids: List<String>)
+
+    @Query("DELETE FROM sessions WHERE projectId = :projectId")
+    suspend fun clearSessions(projectId: String)
+
+    @Query("DELETE FROM messages WHERE sessionId IN (SELECT id FROM sessions WHERE projectId = :projectId AND id NOT IN (:ids))")
+    suspend fun clearMessagesForMissingSessions(projectId: String, ids: List<String>)
+
+    @Query("DELETE FROM run_cursors WHERE sessionId IN (SELECT id FROM sessions WHERE projectId = :projectId AND id NOT IN (:ids))")
+    suspend fun clearCursorsForMissingSessions(projectId: String, ids: List<String>)
+
+    @Query("DELETE FROM messages WHERE sessionId IN (SELECT id FROM sessions WHERE projectId = :projectId)")
+    suspend fun clearMessagesForProject(projectId: String)
+
+    @Query("DELETE FROM run_cursors WHERE sessionId IN (SELECT id FROM sessions WHERE projectId = :projectId)")
+    suspend fun clearCursorsForProject(projectId: String)
+
+    @Transaction
+    suspend fun replaceSessions(projectId: String, sessions: List<SessionEntity>) {
+        upsertSessions(sessions)
+        if (sessions.isEmpty()) {
+            clearMessagesForProject(projectId)
+            clearCursorsForProject(projectId)
+            clearSessions(projectId)
+        } else {
+            val ids = sessions.map { it.id }
+            clearMessagesForMissingSessions(projectId, ids)
+            clearCursorsForMissingSessions(projectId, ids)
+            removeMissingSessions(projectId, ids)
+        }
+    }
 
     @Query("DELETE FROM messages WHERE sessionId = :sessionId")
     suspend fun clearMessages(sessionId: String)
@@ -120,12 +170,24 @@ interface HermesDao {
     @Query("DELETE FROM projects")
     suspend fun clearProjects()
 
+    @Query("DELETE FROM messages")
+    suspend fun clearAllMessages()
+
+    @Query("DELETE FROM run_cursors")
+    suspend fun clearRunCursors()
+
+    @Query("DELETE FROM sync_state")
+    suspend fun clearSyncState()
+
     @Query("DELETE FROM pending_prompts")
     suspend fun clearOutbox()
 
     @Transaction
     suspend fun clearAllProtectedData() {
         clearOutbox()
+        clearAllMessages()
+        clearRunCursors()
+        clearSyncState()
         clearProjects()
         clearMediaRows()
     }

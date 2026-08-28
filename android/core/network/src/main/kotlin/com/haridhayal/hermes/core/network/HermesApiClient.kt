@@ -11,9 +11,19 @@ import com.haridhayal.hermes.core.model.CreateProjectRequest
 import com.haridhayal.hermes.core.model.CreateSessionRequest
 import com.haridhayal.hermes.core.model.DeviceResponse
 import com.haridhayal.hermes.core.model.JobsResponse
+import com.haridhayal.hermes.core.model.JobResponse
+import com.haridhayal.hermes.core.model.JobWriteRequest
+import com.haridhayal.hermes.core.model.MaintenanceResultDto
 import com.haridhayal.hermes.core.model.MaintenanceRequest
+import com.haridhayal.hermes.core.model.MaintenanceStatusDto
 import com.haridhayal.hermes.core.model.MessagePage
+import com.haridhayal.hermes.core.model.ModelsResponse
+import com.haridhayal.hermes.core.model.NotificationKindsRequest
+import com.haridhayal.hermes.core.model.NotificationRegistrationRequest
+import com.haridhayal.hermes.core.model.NotificationSendResult
+import com.haridhayal.hermes.core.model.NotificationSettingsDto
 import com.haridhayal.hermes.core.model.OkResponse
+import com.haridhayal.hermes.core.model.OpenProjectResponse
 import com.haridhayal.hermes.core.model.PairingClaimRequest
 import com.haridhayal.hermes.core.model.PairingClaimResponse
 import com.haridhayal.hermes.core.model.ProjectListResponse
@@ -22,10 +32,15 @@ import com.haridhayal.hermes.core.model.RenameSessionRequest
 import com.haridhayal.hermes.core.model.SearchResponse
 import com.haridhayal.hermes.core.model.SendMessageRequest
 import com.haridhayal.hermes.core.model.SendResult
+import com.haridhayal.hermes.core.model.ScheduledReadResponse
+import com.haridhayal.hermes.core.model.ScheduledReplyRequest
+import com.haridhayal.hermes.core.model.ScheduledReplyResult
 import com.haridhayal.hermes.core.model.SessionListResponse
 import com.haridhayal.hermes.core.model.SessionResponse
 import com.haridhayal.hermes.core.model.StatusResponse
 import com.haridhayal.hermes.core.model.StreamEventDto
+import com.haridhayal.hermes.core.model.SkillsResponse
+import com.haridhayal.hermes.core.model.ToolsetsResponse
 import com.haridhayal.hermes.core.model.UpdateProjectRequest
 import java.io.File
 import java.io.IOException
@@ -91,7 +106,10 @@ class HermesApiClient(
         executeUnit(config, "api/v1/me", "DELETE", null, idempotencyKey = UUID.randomUUID().toString())
     }
 
-    suspend fun projects(config: ConnectionConfig): ProjectListResponse = get(config, "api/v1/projects")
+    suspend fun projects(
+        config: ConnectionConfig,
+        archived: Boolean = false,
+    ): ProjectListResponse = get(config, "api/v1/projects${if (archived) "?archived=true" else ""}")
 
     suspend fun createProject(
         config: ConnectionConfig,
@@ -101,6 +119,43 @@ class HermesApiClient(
 
     suspend fun sessions(config: ConnectionConfig, projectId: String): SessionListResponse =
         get(config, "api/v1/projects/${segment(projectId)}/sessions")
+
+    suspend fun openProject(
+        config: ConnectionConfig,
+        projectId: String,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+    ): OpenProjectResponse = write(
+        config,
+        "api/v1/projects/${segment(projectId)}/open",
+        "POST",
+        JsonObject(emptyMap()),
+        idempotencyKey,
+    )
+
+    suspend fun markScheduledRead(
+        config: ConnectionConfig,
+        projectId: String,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+    ): ScheduledReadResponse = write(
+        config,
+        "api/v1/projects/${segment(projectId)}/scheduled/read",
+        "POST",
+        JsonObject(emptyMap()),
+        idempotencyKey,
+    )
+
+    suspend fun replyScheduled(
+        config: ConnectionConfig,
+        projectId: String,
+        request: ScheduledReplyRequest,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+    ): ScheduledReplyResult = write(
+        config,
+        "api/v1/projects/${segment(projectId)}/scheduled/reply",
+        "POST",
+        request,
+        idempotencyKey,
+    )
 
     suspend fun createSession(
         config: ConnectionConfig,
@@ -275,16 +330,16 @@ class HermesApiClient(
 
     suspend fun createJob(
         config: ConnectionConfig,
-        body: JsonObject,
+        body: JobWriteRequest,
         idempotencyKey: String = UUID.randomUUID().toString(),
-    ): JsonElement = write(config, "api/v1/jobs", "POST", body, idempotencyKey)
+    ): JobResponse = write(config, "api/v1/jobs", "POST", body, idempotencyKey)
 
     suspend fun updateJob(
         config: ConnectionConfig,
         jobId: String,
-        body: JsonObject,
+        body: JobWriteRequest,
         idempotencyKey: String = UUID.randomUUID().toString(),
-    ): JsonElement = write(config, "api/v1/jobs/${segment(jobId)}", "PATCH", body, idempotencyKey)
+    ): JobResponse = write(config, "api/v1/jobs/${segment(jobId)}", "PATCH", body, idempotencyKey)
 
     suspend fun jobAction(
         config: ConnectionConfig,
@@ -311,9 +366,9 @@ class HermesApiClient(
         null,
         idempotencyKey,
     )
-    suspend fun models(config: ConnectionConfig): JsonElement = get(config, "api/v1/models")
-    suspend fun skills(config: ConnectionConfig): JsonElement = get(config, "api/v1/skills")
-    suspend fun toolsets(config: ConnectionConfig): JsonElement = get(config, "api/v1/toolsets")
+    suspend fun models(config: ConnectionConfig): ModelsResponse = get(config, "api/v1/models")
+    suspend fun skills(config: ConnectionConfig): SkillsResponse = get(config, "api/v1/skills")
+    suspend fun toolsets(config: ConnectionConfig): ToolsetsResponse = get(config, "api/v1/toolsets")
     suspend fun agentName(config: ConnectionConfig): AgentNameResponse = get(config, "api/v1/settings/agent")
 
     suspend fun setAgentName(
@@ -332,11 +387,64 @@ class HermesApiClient(
         config: ConnectionConfig,
         hours: Int,
         idempotencyKey: String = UUID.randomUUID().toString(),
-    ): JsonElement = write(
+    ): MaintenanceResultDto = write(
         config,
         "api/v1/maintenance",
         "POST",
         MaintenanceRequest(hours),
+        idempotencyKey,
+    )
+
+    suspend fun maintenanceStatus(config: ConnectionConfig): MaintenanceStatusDto =
+        get(config, "api/v1/maintenance")
+
+    suspend fun notifications(config: ConnectionConfig): NotificationSettingsDto =
+        get(config, "api/v1/notifications")
+
+    suspend fun registerNotifications(
+        config: ConnectionConfig,
+        request: NotificationRegistrationRequest,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+    ): NotificationSettingsDto = write(
+        config,
+        "api/v1/notifications",
+        "PUT",
+        request,
+        idempotencyKey,
+    )
+
+    suspend fun updateNotificationKinds(
+        config: ConnectionConfig,
+        request: NotificationKindsRequest,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+    ): NotificationSettingsDto = write(
+        config,
+        "api/v1/notifications",
+        "PATCH",
+        request,
+        idempotencyKey,
+    )
+
+    suspend fun disableNotifications(
+        config: ConnectionConfig,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+    ): NotificationSettingsDto = execute(
+        config.baseUrl,
+        config.accessToken,
+        "api/v1/notifications",
+        "DELETE",
+        null,
+        idempotencyKey,
+    )
+
+    suspend fun testNotifications(
+        config: ConnectionConfig,
+        idempotencyKey: String = UUID.randomUUID().toString(),
+    ): NotificationSendResult = write(
+        config,
+        "api/v1/notifications/test",
+        "POST",
+        JsonObject(emptyMap()),
         idempotencyKey,
     )
 

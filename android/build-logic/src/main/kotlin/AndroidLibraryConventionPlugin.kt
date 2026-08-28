@@ -8,9 +8,9 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) = with(target) {
         pluginManager.apply("com.android.library")
         extensions.configure<LibraryExtension> {
-            compileSdk = 37
+            compileSdk = 36
             defaultConfig {
-                minSdk = 29
+                minSdk = 33
                 testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
             }
             compileOptions {

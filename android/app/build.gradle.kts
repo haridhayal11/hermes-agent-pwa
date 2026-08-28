@@ -6,12 +6,16 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+val firebaseConfigured = file("google-services.json").isFile
+if (firebaseConfigured) pluginManager.apply("com.google.gms.google-services")
+
 android {
     namespace = "com.haridhayal.hermes"
     defaultConfig {
         applicationId = "com.haridhayal.hermes"
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("boolean", "FIREBASE_CONFIGURED", firebaseConfigured.toString())
     }
     buildTypes {
         release {
@@ -43,8 +47,14 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.hilt.android)
     implementation(libs.androidx.hilt.work)
+    implementation(libs.androidx.work.runtime)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
     ksp(libs.hilt.compiler)
+    ksp(libs.androidx.hilt.compiler)
     debugImplementation(libs.compose.ui.tooling)
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test)
     androidTestImplementation(libs.androidx.junit)

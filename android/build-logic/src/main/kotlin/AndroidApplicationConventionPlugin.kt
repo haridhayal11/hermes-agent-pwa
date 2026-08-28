@@ -8,11 +8,11 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) = with(target) {
         pluginManager.apply("com.android.application")
         extensions.configure<ApplicationExtension> {
-            compileSdk = 37
+            compileSdk = 36
             buildFeatures.buildConfig = true
             defaultConfig {
-                minSdk = 29
-                targetSdk = 37
+                minSdk = 33
+                targetSdk = 36
                 testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
             }
             compileOptions {

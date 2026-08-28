@@ -47,7 +47,7 @@ deploying to a *different* machine from the one you are sitting at.
 - **A Hermes gateway** on the same host, with `API_SERVER_ENABLED=true` and an
   `API_SERVER_KEY` set. The key is mandatory even on loopback — the gateway
   refuses to start the API server without one.
-- **Node 20.9+** and **pnpm**.
+- **Node 22+** and **pnpm**.
 - **Tailscale.** Not optional, and not just for remote access: service workers
   and Web Push require a secure context, and `http://100.x.x.x` is not one.
   `tailscale serve` issues a real certificate for the MagicDNS name, which is
@@ -81,8 +81,10 @@ push notifications can exist.
 - **Web Push** on completion, on an approval request, on a question, and on a
   scheduled job — with per-device control over which kinds you want.
 - **Scheduled jobs.** Hermes cron jobs can be bound to a project and their
-  output lands in that thread. Hermes cannot deliver to a PWA, so the app reads
-  the output file the gateway writes to disk before it tries.
+  output lands in one protected Scheduled inbox per project. Unread reports
+  take priority when opening a project, and replying starts a normal chat with
+  the exact report retained as context. Hermes cannot deliver to a PWA, so the
+  app reads the output files the gateway writes to disk.
 - **Attachments both ways.** Images inline; other files are written to the host
   and named by path, because that is the only shape the API accepts.
 - **Search** over project names, instructions and opening prompts. Message
@@ -108,15 +110,15 @@ pnpm device revoke --id dev_...
 ```bash
 pnpm build           # next build
 pnpm start           # production server
-npx eslint src --max-warnings=0
-npx tsc --noEmit     # run this *after* a build — see below
+pnpm lint
+pnpm typecheck       # generates Next route types, then runs TypeScript
 ```
 
 `next lint` was removed in Next 16 and `next build` no longer lints, so eslint
-runs separately. `tsc` has to run after at least one `next dev` or `next build`:
-`PageProps`, `LayoutProps` and `RouteContext` are generated into `.next/types`,
-which is not in the repo, so a typecheck on a fresh clone fails with
-`Cannot find name 'RouteContext'` until something has generated them.
+runs separately. `pnpm typecheck` runs `next typegen` first because `PageProps`,
+`LayoutProps` and `RouteContext` are generated into `.next/types` rather than
+checked into the repository. It therefore works on a clean checkout as well as
+after a development or production build.
 
 `pnpm test` runs server contract tests and `pnpm openapi:check` verifies that
 every versioned route is represented in the public contract. Android unit,
