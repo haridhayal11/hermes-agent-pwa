@@ -19,10 +19,10 @@ ssh -o BatchMode=yes <user>@<host> whoami   # must print the user, not prompt
 
 ### 2. Runtime
 
-Next 16 requires **Node 20.9+**, and the build needs pnpm:
+The app and Firebase Admin require **Node 22+**, and the build needs pnpm:
 
 ```bash
-node -v          # must be >= 20.9
+node -v          # must be >= 22
 npm i -g pnpm
 ```
 
@@ -61,12 +61,20 @@ VAPID_PUBLIC_KEY=<from: npx web-push generate-vapid-keys>
 VAPID_PRIVATE_KEY=<same command>
 VAPID_SUBJECT=<optional; a routable mailto: or https: URL>
 HERMES_CRON_DIR=/home/<gateway user>/.hermes/cron
+FIREBASE_PROJECT_ID=<optional Firebase project for Android push>
+GOOGLE_APPLICATION_CREDENTIALS=</outside/repo/service-account.json>
 ```
 
 `VAPID_SUBJECT` is optional but not cosmetic. It is the JWT `sub` claim, and
 Apple rejects anything unroutable with `403 BadJwtToken` — which on iOS means
 notifications fail silently. The default is the project repo URL, which works;
 set this only if you want a different contact on the claim.
+
+Native Android push is independent of VAPID. If enabled, Firebase Admin uses
+Application Default Credentials and `FIREBASE_PROJECT_ID`; the service-account
+file stays outside Git. The APK must be built with the matching ignored
+`android/app/google-services.json`. Either push provider may be configured on
+its own.
 
 `HERMES_CRON_DIR` is how scheduled jobs reach a project. Hermes cannot deliver
 a cron result to a PWA — `deliver` only resolves to registered gateway

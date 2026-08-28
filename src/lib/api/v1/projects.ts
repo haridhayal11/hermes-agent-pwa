@@ -13,6 +13,9 @@ interface StoredProject {
   provider: string | null;
   model_options: string | null;
   session_id: string;
+  last_chat_session_id?: string | null;
+  scheduled_session_id?: string | null;
+  unread_scheduled_count?: number;
   created_at: number;
   last_active_at: number;
   archived: number;
@@ -52,7 +55,9 @@ export function projectDto(project: StoredProject) {
     instructions: project.instructions,
     pinned: project.pinned === 1,
     skills: parseStrings(project.skills),
-    modelSelection: project.model
+    // Options still apply when model is null (gateway default), so do not
+    // discard them just because the project has no pinned model.
+    modelSelection: project.model || project.model_options
       ? {
           model: project.model,
           provider: project.provider,
@@ -62,6 +67,9 @@ export function projectDto(project: StoredProject) {
     activeSessionId: project.session_id,
     // Retained for clients generated from the initial v1 contract.
     sessionId: project.session_id,
+    lastChatSessionId: project.last_chat_session_id ?? project.session_id,
+    scheduledSessionId: project.scheduled_session_id ?? null,
+    unreadScheduledCount: project.unread_scheduled_count ?? 0,
     createdAt: project.created_at,
     lastActiveAt: project.last_active_at,
     archived: project.archived === 1,

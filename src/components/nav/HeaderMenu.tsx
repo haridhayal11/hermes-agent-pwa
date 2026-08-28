@@ -20,9 +20,11 @@ import type { Project } from "@/lib/chat-types";
 
 export function HeaderMenu({
   project,
+  activeSessionId,
   onSearch,
 }: {
   project?: Project;
+  activeSessionId?: string;
   /** opens the cross-project search overlay, owned by the shell */
   onSearch?: () => void;
 }) {
@@ -70,6 +72,7 @@ export function HeaderMenu({
       {project && (
         <ProjectSettingsSheet
           project={project}
+          sessionId={activeSessionId}
           open={editOpen}
           onClose={() => setEditOpen(false)}
         />

@@ -279,6 +279,49 @@
         }
       }
     },
+    "/api/v1/projects/{projectId}/open": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+      "post": {
+        "operationId": "openProject",
+        "summary": "Resolve the unread-aware entry session for a project",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "responses": {
+          "200": { "description": "Resolved session", "content": { "application/json": { "schema": { "type": "object", "required": ["session", "sessionId"], "properties": { "session": { "$ref": "#/components/schemas/Session" }, "sessionId": { "type": "string" } } } } } },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}/scheduled/read": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+      "post": {
+        "operationId": "markScheduledRead",
+        "summary": "Mark every currently unread scheduled report read globally",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "responses": {
+          "200": { "description": "Read state updated", "content": { "application/json": { "schema": { "type": "object", "required": ["ok", "markedRead"], "properties": { "ok": { "const": true }, "markedRead": { "type": "integer", "minimum": 0 } } } } } },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/projects/{projectId}/scheduled/reply": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }],
+      "post": {
+        "operationId": "replyToScheduledReport",
+        "summary": "Create a normal root discussion from a scheduled report",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ScheduledReply" } } } },
+        "responses": {
+          "202": { "description": "Discussion created; startupError is present when the initial run could not be started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ScheduledReplyResult" } } } },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/v1/projects/{projectId}/sessions/{sessionId}": {
       "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
       "get": {
@@ -304,7 +347,9 @@
       "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
       "post": {
         "operationId": "selectSession",
-        "summary": "Change the shared active session for Android, PWA, and jobs",
+        "summary": "Validate a client-local session selection",
+        "description": "Compatibility endpoint. Session navigation is local to each client and this operation does not change another device's active chat.",
+        "deprecated": true,
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "responses": { "200": { "description": "Selected session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionEnvelope" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } }
       }
@@ -313,7 +358,7 @@
       "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
       "post": {
         "operationId": "forkSession",
-        "summary": "Fork and select a child session",
+        "summary": "Fork a child session",
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string" } } } } } },
         "responses": { "201": { "description": "Forked session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionEnvelope" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "501": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" } }
@@ -333,7 +378,7 @@
       "post": {
         "operationId": "sendSessionMessage",
         "summary": "Start, steer, or queue a message in this session",
-        "description": "Offline clients keep this session ID pinned even when another client changes the shared selection.",
+        "description": "The explicit session ID keeps sending independent of navigation on every other client.",
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendMessage" } } } },
         "responses": { "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendResult" } } } }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" } }
@@ -528,26 +573,35 @@
         }
       }
     },
-    "/api/v1/models": { "get": { "operationId": "listModels", "summary": "List model providers and selections", "responses": { "200": { "description": "Model catalogue", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } } },
-    "/api/v1/skills": { "get": { "operationId": "listSkills", "summary": "List installed skill metadata", "responses": { "200": { "description": "Skill catalogue", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } } },
-    "/api/v1/toolsets": { "get": { "operationId": "listToolsets", "summary": "List available toolsets", "responses": { "200": { "description": "Toolset catalogue", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/models": { "get": { "operationId": "listModels", "summary": "List model providers and selections", "responses": { "200": { "description": "Model catalogue", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelsResponse" } } } }, "401": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/skills": { "get": { "operationId": "listSkills", "summary": "List installed skill metadata", "responses": { "200": { "description": "Skill catalogue", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SkillsResponse" } } } }, "401": { "$ref": "#/components/responses/Error" } } } },
+    "/api/v1/toolsets": { "get": { "operationId": "listToolsets", "summary": "List available toolsets", "responses": { "200": { "description": "Toolset catalogue", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ToolsetsResponse" } } } }, "401": { "$ref": "#/components/responses/Error" } } } },
     "/api/v1/search": { "get": { "operationId": "searchLocal", "summary": "Search projects, sessions, messages, and job deliveries", "parameters": [{ "name": "q", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Conversation hits carry projectId and sessionId", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } } },
     "/api/v1/files": { "get": { "operationId": "probeFile", "summary": "Probe or download a project file", "parameters": [{ "name": "path", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "File metadata or bytes" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } } },
     "/api/v1/settings/agent": {
       "get": { "operationId": "getAgentName", "summary": "Get the shared agent name", "responses": { "200": { "description": "Agent name", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } },
       "put": { "operationId": "setAgentName", "summary": "Set the shared agent name", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } } } } }, "responses": { "200": { "description": "Updated name", "content": { "application/json": { "schema": true } } }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" } } }
     },
+    "/api/v1/notifications": {
+      "get": { "operationId": "getNotificationSettings", "summary": "Read native notification state for this device", "responses": { "200": { "description": "Notification settings", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotificationSettings" } } } }, "401": { "$ref": "#/components/responses/Error" } } },
+      "put": { "operationId": "registerNotifications", "summary": "Register this device's Firebase Installation ID", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotificationRegistration" } } } }, "responses": { "200": { "description": "Registered", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotificationSettings" } } } }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "503": { "$ref": "#/components/responses/Error" } } },
+      "patch": { "operationId": "updateNotificationKinds", "summary": "Update this device's notification kinds", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["kinds"], "properties": { "kinds": { "$ref": "#/components/schemas/NotificationKinds" } } } } } }, "responses": { "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotificationSettings" } } } }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } },
+      "delete": { "operationId": "disableNotifications", "summary": "Remove this device's native notification target", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "description": "Disabled", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotificationSettings" } } } }, "401": { "$ref": "#/components/responses/Error" } } }
+    },
+    "/api/v1/notifications/test": {
+      "post": { "operationId": "testNotifications", "summary": "Send a test notification to all subscribed devices", "responses": { "200": { "description": "Delivery result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotificationSendResult" } } } }, "401": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" }, "503": { "$ref": "#/components/responses/Error" } } }
+    },
     "/api/v1/maintenance": {
       "get": { "operationId": "getMaintenanceStatus", "summary": "Inspect safe local maintenance statistics", "responses": { "200": { "description": "Maintenance statistics", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } },
       "post": { "operationId": "pruneRunHistory", "summary": "Prune old replay events", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "hours": { "type": "number", "exclusiveMinimum": 0, "default": 24 } } } } } }, "responses": { "200": { "description": "Prune result", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } }
     },
     "/api/v1/jobs": {
-      "get": { "operationId": "listJobs", "summary": "List scheduled jobs", "responses": { "200": { "description": "Jobs", "content": { "application/json": { "schema": true } } }, "401": { "$ref": "#/components/responses/Error" } } },
-      "post": { "operationId": "createJob", "summary": "Create a scheduled job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": true } } }, "responses": { "201": { "description": "Created job" }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "501": { "$ref": "#/components/responses/Error" } } }
+      "get": { "operationId": "listJobs", "summary": "List scheduled jobs", "responses": { "200": { "description": "Jobs", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobsResponse" } } } }, "401": { "$ref": "#/components/responses/Error" } } },
+      "post": { "operationId": "createJob", "summary": "Create a scheduled job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobWrite" } } } }, "responses": { "201": { "description": "Created job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobResponse" } } } }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "501": { "$ref": "#/components/responses/Error" } } }
     },
     "/api/v1/jobs/{jobId}": {
       "parameters": [{ "$ref": "#/components/parameters/JobId" }],
-      "patch": { "operationId": "updateJob", "summary": "Update a job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": true } } }, "responses": { "200": { "description": "Updated job" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } },
+      "patch": { "operationId": "updateJob", "summary": "Update a job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobWrite" } } } }, "responses": { "200": { "description": "Updated job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobResponse" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } },
       "delete": { "operationId": "deleteJob", "summary": "Delete a job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "$ref": "#/components/responses/Ok" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } }
     },
     "/api/v1/jobs/{jobId}/pause": { "parameters": [{ "$ref": "#/components/parameters/JobId" }], "post": { "operationId": "pauseJob", "summary": "Pause a job", "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }], "responses": { "200": { "description": "Paused job" }, "401": { "$ref": "#/components/responses/Error" }, "404": { "$ref": "#/components/responses/Error" } } } },
@@ -643,14 +697,14 @@
         "type": ["object", "null"],
         "required": ["model"],
         "properties": {
-          "model": { "type": "string" },
+          "model": { "type": ["string", "null"] },
           "provider": { "type": ["string", "null"] },
           "options": { "type": ["object", "null"], "additionalProperties": true }
         }
       },
       "Project": {
         "type": "object",
-        "required": ["id", "name", "emoji", "color", "workingDirectory", "instructions", "pinned", "skills", "modelSelection", "activeSessionId", "sessionId", "createdAt", "lastActiveAt", "archived"],
+        "required": ["id", "name", "emoji", "color", "workingDirectory", "instructions", "pinned", "skills", "modelSelection", "activeSessionId", "sessionId", "lastChatSessionId", "scheduledSessionId", "unreadScheduledCount", "createdAt", "lastActiveAt", "archived"],
         "properties": {
           "id": { "type": "string" },
           "name": { "type": "string" },
@@ -661,8 +715,11 @@
           "pinned": { "type": "boolean" },
           "skills": { "type": "array", "items": { "type": "string" } },
           "modelSelection": { "$ref": "#/components/schemas/ModelSelection" },
-          "activeSessionId": { "type": "string" },
+          "activeSessionId": { "type": "string", "description": "Server fallback session for cold starts and legacy routes; not a cross-device UI selection." },
           "sessionId": { "type": "string", "deprecated": true, "description": "Compatibility alias for activeSessionId." },
+          "lastChatSessionId": { "type": "string", "description": "Most recently selected normal chat; Scheduled never overwrites it." },
+          "scheduledSessionId": { "type": ["string", "null"] },
+          "unreadScheduledCount": { "type": "integer", "minimum": 0 },
           "createdAt": { "type": "integer" },
           "lastActiveAt": { "type": "integer" },
           "archived": { "type": "boolean" }
@@ -700,7 +757,7 @@
       },
       "Session": {
         "type": "object",
-        "required": ["id", "projectId", "title", "parentSessionId", "createdAt", "lastActiveAt", "archived"],
+        "required": ["id", "projectId", "title", "parentSessionId", "createdAt", "lastActiveAt", "archived", "kind"],
         "properties": {
           "id": { "type": "string" },
           "projectId": { "type": "string" },
@@ -708,7 +765,8 @@
           "parentSessionId": { "type": ["string", "null"] },
           "createdAt": { "type": "integer" },
           "lastActiveAt": { "type": "integer" },
-          "archived": { "type": "boolean" }
+          "archived": { "type": "boolean" },
+          "kind": { "enum": ["chat", "scheduled"] }
         }
       },
       "SessionEnvelope": {
@@ -716,7 +774,7 @@
         "required": ["session"],
         "properties": {
           "session": { "$ref": "#/components/schemas/Session" },
-          "activeSessionId": { "type": "string" },
+          "activeSessionId": { "type": "string", "description": "Session returned by this operation when applicable." },
           "messageCount": { "type": ["integer", "null"] }
         }
       },
@@ -724,7 +782,7 @@
         "type": "object",
         "required": ["activeSessionId", "sessions"],
         "properties": {
-          "activeSessionId": { "type": "string" },
+          "activeSessionId": { "type": "string", "description": "Server fallback session for cold starts and legacy routes; not a cross-device UI selection." },
           "sessions": { "type": "array", "items": { "$ref": "#/components/schemas/Session" } }
         }
       },
@@ -774,6 +832,29 @@
           }
         ]
       },
+      "ScheduledReply": {
+        "type": "object",
+        "required": ["deliveryId", "text"],
+        "properties": {
+          "deliveryId": { "type": "string", "minLength": 1 },
+          "text": { "type": "string" },
+          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/Attachment" } }
+        },
+        "additionalProperties": false
+      },
+      "ScheduledReplyResult": {
+        "type": "object",
+        "required": ["session", "sessionId", "queued", "mode", "runId"],
+        "properties": {
+          "session": { "$ref": "#/components/schemas/Session" },
+          "sessionId": { "type": "string" },
+          "queued": { "type": "boolean" },
+          "mode": { "enum": ["started", "steered", "queued", "failed"] },
+          "runId": { "type": "string" },
+          "startupError": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      },
       "SendMessage": {
         "type": "object",
         "properties": {
@@ -821,6 +902,194 @@
           "occurredAt": { "type": "integer" },
           "payload": { "type": "object", "additionalProperties": true }
         }
+      },
+      "ModelsResponse": {
+        "type": "object",
+        "required": ["providers", "current"],
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["slug", "name", "authenticated", "warning", "isCurrent", "models"],
+              "properties": {
+                "slug": { "type": "string" },
+                "name": { "type": "string" },
+                "authenticated": { "type": "boolean" },
+                "warning": { "type": ["string", "null"] },
+                "isCurrent": { "type": "boolean" },
+                "models": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "fast", "reasoning", "featured"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "fast": { "type": "boolean" },
+                      "reasoning": { "type": "boolean" },
+                      "featured": { "type": "boolean" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "current": {
+            "type": "object",
+            "required": ["model", "provider"],
+            "properties": {
+              "model": { "type": ["string", "null"] },
+              "provider": { "type": ["string", "null"] }
+            }
+          },
+          "unavailable": { "type": "boolean" }
+        }
+      },
+      "SkillsResponse": {
+        "type": "object",
+        "required": ["skills"],
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name"],
+              "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "category": { "type": "string" }
+              },
+              "additionalProperties": true
+            }
+          },
+          "unavailable": { "type": "boolean" }
+        }
+      },
+      "ToolsetsResponse": {
+        "type": "object",
+        "required": ["toolsets"],
+        "properties": {
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name"],
+              "properties": {
+                "name": { "type": "string" },
+                "label": { "type": "string" },
+                "description": { "type": "string" },
+                "enabled": { "type": "boolean" },
+                "configured": { "type": "boolean" },
+                "tools": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          },
+          "unavailable": { "type": "boolean" }
+        }
+      },
+      "NotificationKinds": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": { "enum": ["run", "approval", "question", "job", "job-failed"] }
+      },
+      "NotificationSettings": {
+        "type": "object",
+        "required": ["configured", "enabled", "kinds", "subscriptions"],
+        "properties": {
+          "configured": { "type": "boolean" },
+          "enabled": { "type": "boolean" },
+          "kinds": { "$ref": "#/components/schemas/NotificationKinds" },
+          "subscriptions": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "NotificationRegistration": {
+        "type": "object",
+        "required": ["installationId"],
+        "properties": {
+          "installationId": { "type": "string", "minLength": 10, "maxLength": 512 },
+          "kinds": { "$ref": "#/components/schemas/NotificationKinds" }
+        }
+      },
+      "NotificationSendResult": {
+        "type": "object",
+        "required": ["sent", "failed", "error"],
+        "properties": {
+          "sent": { "type": "integer", "minimum": 0 },
+          "failed": { "type": "integer", "minimum": 0 },
+          "error": { "type": ["string", "null"] }
+        }
+      },
+      "JobsResponse": {
+        "type": "object",
+        "required": ["jobs"],
+        "properties": {
+          "jobs": { "type": "array", "items": { "$ref": "#/components/schemas/Job" } },
+          "unavailable": { "type": "boolean" }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": ["id", "name", "enabled"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "state": { "type": "string" },
+          "schedule": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {
+              "kind": { "enum": ["once", "interval", "cron"] },
+              "display": { "type": "string" },
+              "run_at": { "type": "string" },
+              "minutes": { "type": "integer" },
+              "expr": { "type": "string" }
+            }
+          },
+          "schedule_display": { "type": "string" },
+          "next_run_at": { "type": ["string", "null"] },
+          "last_status": { "type": ["string", "null"] },
+          "last_error": { "type": ["string", "null"] },
+          "prompt": { "type": "string" },
+          "deliver": { "type": "string" },
+          "skills": { "type": "array", "items": { "type": "string" } },
+          "repeat": {
+            "type": ["object", "null"],
+            "properties": {
+              "times": { "type": ["integer", "null"], "minimum": 1 },
+              "completed": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "binding": { "$ref": "#/components/schemas/JobBinding" }
+        },
+        "additionalProperties": true
+      },
+      "JobBinding": {
+        "type": ["object", "null"],
+        "required": ["project_id"],
+        "properties": {
+          "job_id": { "type": "string" },
+          "project_id": { "type": "string" },
+          "project_name": { "type": "string" }
+        }
+      },
+      "JobWrite": {
+        "type": "object",
+        "required": ["name", "schedule", "prompt", "deliver"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "schedule": { "type": "string", "minLength": 1 },
+          "prompt": { "type": "string" },
+          "deliver": { "type": "string" },
+          "skills": { "type": "array", "items": { "type": "string" } },
+          "repeat": { "type": "integer", "minimum": 1, "description": "Create-only run limit." },
+          "binding": { "$ref": "#/components/schemas/JobBinding" }
+        }
+      },
+      "JobResponse": {
+        "type": "object",
+        "required": ["job"],
+        "properties": { "job": { "$ref": "#/components/schemas/Job" } }
       },
       "Status": {
         "type": "object",

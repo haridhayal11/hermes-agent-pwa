@@ -170,6 +170,9 @@ export interface Project {
   /** JSON of Hermes model_options: {reasoning:{enabled,effort}, fast} */
   model_options: string | null;
   session_id: string;
+  last_chat_session_id: string | null;
+  scheduled_session_id: string | null;
+  unread_scheduled_count: number;
   created_at: number;
   last_active_at: number;
   archived: number;
@@ -183,4 +186,5 @@ export interface ProjectSession {
   created_at: number;
   last_active_at: number;
   archived: number;
+  kind: "chat" | "scheduled";
 }

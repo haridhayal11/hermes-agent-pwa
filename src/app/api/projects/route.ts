@@ -4,6 +4,7 @@ import { PROJECT_TEMPLATES } from "@/lib/instructions";
 import { createProjectSession, hermesErrorResponse } from "@/lib/project-session";
 import { publishChange } from "@/lib/api-changes";
 import { registerInitialSession } from "@/lib/project-sessions";
+import { withProjectNavigation } from "@/lib/project-sessions";
 
 // Live proxy: never cached. Without this Next prerenders a zero-argument
 // GET handler at build time and serves the snapshot forever.
@@ -29,8 +30,8 @@ export async function GET(request: Request) {
       `SELECT * FROM projects WHERE archived = ?
        ORDER BY pinned DESC, last_active_at DESC`,
     )
-    .all(archived);
-  return Response.json({ projects });
+    .all(archived) as { id: string }[];
+  return Response.json({ projects: projects.map(withProjectNavigation) });
 }
 
 export async function POST(request: Request) {
@@ -68,12 +69,27 @@ export async function POST(request: Request) {
 
   const now = Date.now();
   db.prepare(
-    `INSERT INTO projects (id, name, emoji, color, cwd, instructions, pinned, skills, session_id, created_at, last_active_at, archived)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-  ).run(id, name, emoji, color, cwd, instructions, pinned, skills.length ? JSON.stringify(skills) : null, sessionId, now, now);
+    `INSERT INTO projects
+      (id, name, emoji, color, cwd, instructions, pinned, skills, session_id,
+       last_chat_session_id, created_at, last_active_at, archived)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+  ).run(
+    id,
+    name,
+    emoji,
+    color,
+    cwd,
+    instructions,
+    pinned,
+    skills.length ? JSON.stringify(skills) : null,
+    sessionId,
+    sessionId,
+    now,
+    now,
+  );
   registerInitialSession(id, sessionId, name, now);
   publishChange("project.changed", { projectId: id });
 
   const project = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id);
-  return Response.json({ project }, { status: 201 });
+  return Response.json({ project: withProjectNavigation(project as { id: string }) }, { status: 201 });
 }

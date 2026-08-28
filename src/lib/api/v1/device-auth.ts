@@ -136,7 +136,13 @@ export function claimPairingCode(
 }
 
 export function revokeDevice(id: string): void {
-  db.prepare(
-    `UPDATE api_devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
-  ).run(Date.now(), id);
+  db.transaction(() => {
+    // Stop native delivery in the same transaction as revocation. Keeping the
+    // device row is useful audit history, so ON DELETE CASCADE cannot do this
+    // job for us.
+    db.prepare(`DELETE FROM native_push_subscriptions WHERE device_id = ?`).run(id);
+    db.prepare(
+      `UPDATE api_devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+    ).run(Date.now(), id);
+  })();
 }

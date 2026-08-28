@@ -3,6 +3,7 @@ import { hermes, type UpdateJobParams } from "@/lib/hermes";
 import { JOB_ID_RE, jobErrorResponse } from "@/lib/job-errors";
 import { clearBinding, fireKey, getBinding, setBinding } from "@/lib/cron-watcher";
 import { publishChange } from "@/lib/api-changes";
+import { ensureScheduledSession } from "@/lib/project-sessions";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,18 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/jobs/[jobI
   // sending the number would replace the dict and break every later read of
   // repeat.times in the scheduler.
 
+  const bindingProjectId = body.binding?.project_id;
+  if (bindingProjectId) {
+    const project = db.prepare(`SELECT id FROM projects WHERE id = ?`).get(bindingProjectId);
+    if (!project) {
+      return Response.json({ error: "unknown project" }, { status: 400 });
+    }
+  }
+
   try {
+    if (bindingProjectId && !(await ensureScheduledSession(bindingProjectId))) {
+      return Response.json({ error: "unknown project" }, { status: 400 });
+    }
     const job = Object.keys(patch).length
       ? (await hermes.jobs.update(jobId, patch)).job
       : (await hermes.jobs.get(jobId)).job;
@@ -62,19 +74,13 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/jobs/[jobI
     // editing a job's prompt should not quietly change where it lands.
     if (body.binding === null) {
       clearBinding(jobId);
-    } else if (body.binding?.project_id) {
-      const project = db
-        .prepare(`SELECT id FROM projects WHERE id = ?`)
-        .get(body.binding.project_id);
-      if (!project) {
-        return Response.json({ error: "unknown project" }, { status: 400 });
-      }
+    } else if (bindingProjectId) {
       // Only stamp on a *new* binding. Re-stamping an existing one on every
       // save would swallow a fire that landed between the edit and the save.
       const existing = getBinding(jobId);
       setBinding(
         jobId,
-        body.binding.project_id,
+        bindingProjectId,
         existing ? existing.last_seen_at : (fireKey(job) ?? ""),
       );
     }

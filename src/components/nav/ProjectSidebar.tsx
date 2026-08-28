@@ -14,6 +14,7 @@ function SessionBranch({
   activeSessionId,
   onSelect,
   onManage,
+  unreadScheduledCount,
   depth = 0,
 }: {
   session: ProjectSession;
@@ -21,6 +22,7 @@ function SessionBranch({
   activeSessionId?: string;
   onSelect: (session: ProjectSession) => void;
   onManage: (session: ProjectSession) => void;
+  unreadScheduledCount: number;
   depth?: number;
 }) {
   const children = childrenByParent.get(session.session_id) ?? [];
@@ -40,11 +42,16 @@ function SessionBranch({
           className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left"
         >
           <span aria-hidden className="text-ink-3">
-            {depth > 0 ? "└" : "•"}
+            {session.kind === "scheduled" ? "◷" : depth > 0 ? "└" : "•"}
           </span>
           <span className="min-w-0 flex-1 truncate">{session.title}</span>
+          {session.kind === "scheduled" && unreadScheduledCount > 0 && (
+            <span className="rounded-chip bg-accent-tint px-1.5 text-meta text-ink">
+              {unreadScheduledCount}
+            </span>
+          )}
         </button>
-        {active && (
+        {active && session.kind !== "scheduled" && (
           <button
             type="button"
             onClick={() => onManage(session)}
@@ -65,6 +72,7 @@ function SessionBranch({
               activeSessionId={activeSessionId}
               onSelect={onSelect}
               onManage={onManage}
+              unreadScheduledCount={unreadScheduledCount}
               depth={depth + 1}
             />
           ))}
@@ -111,6 +119,14 @@ export function ProjectSidebar({
       { method: "POST" },
     );
     router.push(`/p/${session.project_id}/s/${session.session_id}`);
+    onClose();
+  }
+
+  async function openProject(project: Project) {
+    const response = await fetch(`/api/projects/${project.id}/open`, { method: "POST" });
+    if (!response.ok) return;
+    const body = (await response.json()) as { sessionId: string };
+    router.push(`/p/${project.id}/s/${body.sessionId}`);
     onClose();
   }
 
@@ -174,34 +190,52 @@ export function ProjectSidebar({
             const isOpen = expanded.has(project.id);
             return (
               <li key={project.id}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setExpanded((current) => {
-                      const next = new Set(current);
-                      if (next.has(project.id)) next.delete(project.id);
-                      else next.add(project.id);
-                      return next;
-                    })
-                  }
-                  className={`flex min-h-10 w-full items-center gap-2 rounded-control px-2 text-left
-                    text-label font-medium ${
-                      project.id === activeProjectId ? "text-ink" : "text-ink-2 hover:bg-hover-2"
-                    }`}
-                  aria-expanded={isOpen}
+                <div
+                  className={`flex min-h-10 w-full items-center rounded-control text-label font-medium ${
+                    project.id === activeProjectId
+                      ? "text-ink"
+                      : "text-ink-2 hover:bg-hover-2"
+                  }`}
                 >
-                  <span className="grid size-6 place-items-center">
-                    {project.emoji ?? project.name.trim().charAt(0).toUpperCase() ?? "•"}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                  <span
-                    aria-hidden
-                    className="text-ink-3 transition-transform"
-                    style={{ transform: isOpen ? "rotate(90deg)" : undefined }}
+                  <button
+                    type="button"
+                    onClick={() => void openProject(project)}
+                    className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"
                   >
-                    <IconChevronRight size={13} />
-                  </span>
-                </button>
+                    <span className="grid size-6 place-items-center">
+                      {project.emoji ?? project.name.trim().charAt(0).toUpperCase() ?? "•"}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                    {project.unread_scheduled_count > 0 && (
+                      <span
+                        className="size-2 rounded-full bg-accent"
+                        aria-label="Unread scheduled reports"
+                      />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpanded((current) => {
+                        const next = new Set(current);
+                        if (next.has(project.id)) next.delete(project.id);
+                        else next.add(project.id);
+                        return next;
+                      })
+                    }
+                    aria-label={`${isOpen ? "Collapse" : "Expand"} ${project.name}`}
+                    aria-expanded={isOpen}
+                    className="grid size-9 shrink-0 place-items-center text-ink-3"
+                  >
+                    <span
+                      aria-hidden
+                      className="transition-transform"
+                      style={{ transform: isOpen ? "rotate(90deg)" : undefined }}
+                    >
+                      <IconChevronRight size={13} />
+                    </span>
+                  </button>
+                </div>
                 {isOpen && (
                   <ul className="mt-0.5">
                     {roots.map((session) => (
@@ -212,6 +246,7 @@ export function ProjectSidebar({
                         activeSessionId={activeSessionId}
                         onSelect={select}
                         onManage={manage}
+                        unreadScheduledCount={project.unread_scheduled_count}
                       />
                     ))}
                   </ul>

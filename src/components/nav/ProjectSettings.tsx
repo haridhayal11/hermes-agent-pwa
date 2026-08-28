@@ -19,26 +19,36 @@ import { useStatus } from "@/hooks/useStatus";
 
 export function ProjectSettingsSheet({
   project,
+  sessionId,
   open,
   onClose,
 }: {
   project: Project;
+  sessionId?: string;
   open: boolean;
   onClose: () => void;
 }) {
   return (
     <Sheet open={open} onClose={onClose} label="Edit project">
       {/* remounted per open, so an abandoned edit never reappears half-typed */}
-      {open && <ProjectSettingsForm project={project} onClose={onClose} />}
+      {open && (
+        <ProjectSettingsForm
+          project={project}
+          sessionId={sessionId}
+          onClose={onClose}
+        />
+      )}
     </Sheet>
   );
 }
 
 function ProjectSettingsForm({
   project,
+  sessionId,
   onClose,
 }: {
   project: Project;
+  sessionId?: string;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -116,13 +126,16 @@ function ProjectSettingsForm({
     }
   }
 
-  /** Branch the project's currently selected session below the same project. */
+  /** Branch the session visible on this device below the same project. */
   async function branch() {
-    if (busy) return;
+    if (busy || !sessionId) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${project.id}/fork`, { method: "POST" });
+      const res = await fetch(
+        `/api/projects/${project.id}/sessions/${sessionId}/fork`,
+        { method: "POST" },
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error || `${res.status}`);

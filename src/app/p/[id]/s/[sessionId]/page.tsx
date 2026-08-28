@@ -8,6 +8,7 @@ import type {
   ProjectSession,
   ThreadMessage,
 } from "@/lib/chat-types";
+import { withProjectNavigation } from "@/lib/project-sessions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,28 +18,30 @@ export default async function SessionPage({
   params: Promise<{ id: string; sessionId: string }>;
 }) {
   const { id, sessionId } = await params;
-  const project = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id) as
-    | Project
+  const storedProject = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id) as
+    | Omit<Project, "scheduled_session_id" | "unread_scheduled_count">
     | undefined;
   const session = db
     .prepare(
       `SELECT * FROM project_sessions WHERE project_id = ? AND session_id = ? AND archived = 0`,
     )
     .get(id, sessionId) as ProjectSession | undefined;
-  if (!project || !session) notFound();
+  if (!storedProject || !session) notFound();
+  const project = withProjectNavigation(storedProject) as Project;
 
-  const projects = db
+  const projects = (db
     .prepare(
       `SELECT * FROM projects WHERE archived = 0
        ORDER BY pinned DESC, last_active_at DESC`,
     )
-    .all() as Project[];
+    .all() as Omit<Project, "scheduled_session_id" | "unread_scheduled_count">[])
+    .map(withProjectNavigation) as Project[];
   const sessions = db
     .prepare(
       `SELECT ps.* FROM project_sessions ps
        JOIN projects p ON p.id = ps.project_id
        WHERE ps.archived = 0 AND p.archived = 0
-       ORDER BY ps.created_at ASC`,
+       ORDER BY CASE ps.kind WHEN 'scheduled' THEN 0 ELSE 1 END, ps.created_at ASC`,
     )
     .all() as ProjectSession[];
 

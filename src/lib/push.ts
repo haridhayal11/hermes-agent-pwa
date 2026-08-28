@@ -1,4 +1,6 @@
 import webpush from "web-push";
+import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
 import { db } from "./db";
 import { PUSH_KINDS, type PushKind } from "./notification-kinds";
 
@@ -31,6 +33,13 @@ const SUBJECT =
 /** No keys means the feature is simply off; nothing should throw for it. */
 export const pushConfigured = Boolean(PUBLIC_KEY && PRIVATE_KEY);
 
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "";
+/** Native push is optional and independent of VAPID/Web Push. */
+export const nativePushConfigured = Boolean(
+  FIREBASE_PROJECT_ID,
+);
+export const notificationsConfigured = pushConfigured || nativePushConfigured;
+
 if (pushConfigured) {
   webpush.setVapidDetails(SUBJECT, PUBLIC_KEY, PRIVATE_KEY);
 }
@@ -49,9 +58,15 @@ export interface PushPayload {
   kind?: PushKind;
 }
 
-interface SubscriptionRow {
+interface WebSubscriptionRow {
   endpoint: string;
   keys_json: string;
+  kinds_json: string | null;
+}
+
+interface NativeSubscriptionRow {
+  device_id: string;
+  installation_id: string;
   kinds_json: string | null;
 }
 
@@ -66,7 +81,7 @@ interface SubscriptionRow {
  * `test` is deliberately unswitchable. It only ever fires from a button the
  * user just pressed, and a test that can be muted tests nothing.
  */
-function wantsKind(kindsJson: string | null, kind: PushKind | undefined): boolean {
+export function wantsKind(kindsJson: string | null, kind: PushKind | undefined): boolean {
   if (!kindsJson || kind === undefined || kind === "test") return true;
   try {
     const parsed = JSON.parse(kindsJson) as unknown;
@@ -102,11 +117,101 @@ export function setSubscriptionKinds(endpoint: string, kinds: PushKind[]): boole
 }
 
 export function subscriptionCount(): number {
-  return (
+  const web = (
     db.prepare(`SELECT COUNT(*) AS n FROM push_subscriptions`).get() as {
       n: number;
     }
   ).n;
+  const native = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n
+           FROM native_push_subscriptions n
+           JOIN api_devices d ON d.id = n.device_id
+          WHERE d.revoked_at IS NULL`,
+      )
+      .get() as { n: number }
+  ).n;
+  return web + native;
+}
+
+export interface NativeSubscriptionState {
+  enabled: boolean;
+  kinds: PushKind[];
+}
+
+/** Current native-device registration. Missing kinds means all, matching Web Push. */
+export function nativeSubscription(deviceId: string): NativeSubscriptionState {
+  const row = db
+    .prepare(`SELECT kinds_json FROM native_push_subscriptions WHERE device_id = ?`)
+    .get(deviceId) as { kinds_json: string | null } | undefined;
+  return {
+    enabled: Boolean(row),
+    kinds: row ? parseKinds(row.kinds_json) : [...PUSH_KINDS],
+  };
+}
+
+export function saveNativeSubscription(
+  deviceId: string,
+  installationId: string,
+  kinds: PushKind[],
+): NativeSubscriptionState {
+  const now = Date.now();
+  db.transaction(() => {
+    // A re-pair creates a new device id but may retain the same Firebase
+    // installation. Move it; never fan out twice to one app installation.
+    db.prepare(
+      `DELETE FROM native_push_subscriptions
+        WHERE installation_id = ? AND device_id <> ?`,
+    ).run(installationId, deviceId);
+    db.prepare(
+      `INSERT INTO native_push_subscriptions
+         (device_id, installation_id, kinds_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(device_id) DO UPDATE SET
+         installation_id = excluded.installation_id,
+         kinds_json = excluded.kinds_json,
+         updated_at = excluded.updated_at`,
+    ).run(deviceId, installationId, JSON.stringify(canonicalKinds(kinds)), now, now);
+  })();
+  return nativeSubscription(deviceId);
+}
+
+export function setNativeSubscriptionKinds(
+  deviceId: string,
+  kinds: PushKind[],
+): NativeSubscriptionState | null {
+  const result = db
+    .prepare(
+      `UPDATE native_push_subscriptions
+          SET kinds_json = ?, updated_at = ?
+        WHERE device_id = ?`,
+    )
+    .run(JSON.stringify(canonicalKinds(kinds)), Date.now(), deviceId);
+  return result.changes > 0 ? nativeSubscription(deviceId) : null;
+}
+
+export function deleteNativeSubscription(deviceId: string): boolean {
+  return (
+    db.prepare(`DELETE FROM native_push_subscriptions WHERE device_id = ?`).run(deviceId)
+      .changes > 0
+  );
+}
+
+function canonicalKinds(kinds: PushKind[]): PushKind[] {
+  return PUSH_KINDS.filter((kind) => kinds.includes(kind));
+}
+
+function parseKinds(raw: string | null): PushKind[] {
+  if (!raw) return [...PUSH_KINDS];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? PUSH_KINDS.filter((kind) => parsed.includes(kind))
+      : [...PUSH_KINDS];
+  } catch {
+    return [...PUSH_KINDS];
+  }
 }
 
 export function saveSubscription(
@@ -142,14 +247,46 @@ export interface SendResult {
  * also what working correctly looks like from the sending side.
  */
 export async function sendToAll(payload: PushPayload): Promise<SendResult> {
-  if (!pushConfigured) return { sent: 0, failed: 0, error: "no VAPID keys" };
-  const rows = (
+  if (!notificationsConfigured) {
+    return { sent: 0, failed: 0, error: "no push provider configured" };
+  }
+  const webRows = (
     db
       .prepare(`SELECT endpoint, keys_json, kinds_json FROM push_subscriptions`)
-      .all() as SubscriptionRow[]
+      .all() as WebSubscriptionRow[]
   ).filter((row) => wantsKind(row.kinds_json, payload.kind));
-  if (rows.length === 0) return { sent: 0, failed: 0, error: null };
+  const nativeRows = (
+    db
+      .prepare(
+        `SELECT n.device_id, n.installation_id, n.kinds_json
+           FROM native_push_subscriptions n
+           JOIN api_devices d ON d.id = n.device_id
+          WHERE d.revoked_at IS NULL`,
+      )
+      .all() as NativeSubscriptionRow[]
+  ).filter((row) => wantsKind(row.kinds_json, payload.kind));
+  if (webRows.length === 0 && nativeRows.length === 0) {
+    return { sent: 0, failed: 0, error: null };
+  }
 
+  const webResult = pushConfigured
+    ? await sendWebPush(payload, webRows)
+    : { sent: 0, failed: 0, error: null };
+  const nativeResult = nativePushConfigured
+    ? await sendNativePush(payload, nativeRows)
+    : { sent: 0, failed: 0, error: null };
+  return {
+    sent: webResult.sent + nativeResult.sent,
+    failed: webResult.failed + nativeResult.failed,
+    error: nativeResult.error ?? webResult.error,
+  };
+}
+
+async function sendWebPush(
+  payload: PushPayload,
+  rows: WebSubscriptionRow[],
+): Promise<SendResult> {
+  if (rows.length === 0) return { sent: 0, failed: 0, error: null };
   const body = JSON.stringify({ ...payload, ts: Date.now() });
   let sent = 0;
   let failed = 0;
@@ -180,6 +317,75 @@ export async function sendToAll(payload: PushPayload): Promise<SendResult> {
     }),
   );
 
+  return { sent, failed, error };
+}
+
+function firebaseMessaging() {
+  const app =
+    getApps()[0] ??
+    initializeApp({
+      credential: applicationDefault(),
+      projectId: FIREBASE_PROJECT_ID,
+    });
+  return getMessaging(app);
+}
+
+async function sendNativePush(
+  payload: PushPayload,
+  rows: NativeSubscriptionRow[],
+): Promise<SendResult> {
+  if (rows.length === 0) return { sent: 0, failed: 0, error: null };
+  let sent = 0;
+  let failed = 0;
+  let error: string | null = null;
+  const data = Object.fromEntries(
+    Object.entries({
+      title: payload.title,
+      body: payload.body,
+      url: payload.url ?? "/",
+      tag: payload.tag ?? "",
+      kind: payload.kind ?? "run",
+      ts: String(Date.now()),
+    }).map(([key, value]) => [key, String(value)]),
+  );
+
+  try {
+    const messaging = firebaseMessaging();
+    for (let offset = 0; offset < rows.length; offset += 500) {
+      const batch = rows.slice(offset, offset + 500);
+      const response = await messaging.sendEachForMulticast({
+        fids: batch.map((row) => row.installation_id),
+        data,
+        android: {
+          priority: "high",
+          ttl: 60 * 60 * 1000,
+          collapseKey: payload.tag,
+        },
+      });
+      sent += response.successCount;
+      failed += response.failureCount;
+      response.responses.forEach((result, index) => {
+        if (result.success) return;
+        const code = result.error?.code ?? "messaging/unknown-error";
+        error = result.error?.message ?? code;
+        if (
+          code === "messaging/registration-token-not-registered" ||
+          code === "messaging/invalid-registration-token" ||
+          code === "messaging/installation-id-not-registered"
+        ) {
+          db.prepare(
+            `DELETE FROM native_push_subscriptions WHERE installation_id = ?`,
+          ).run(batch[index].installation_id);
+        } else {
+          console.error(`[push] FCM send failed (${code}): ${error}`);
+        }
+      });
+    }
+  } catch (cause) {
+    failed += rows.length;
+    error = cause instanceof Error ? cause.message : "FCM send failed";
+    console.error(`[push] FCM fan-out failed: ${error}`);
+  }
   return { sent, failed, error };
 }
 

@@ -27,6 +27,10 @@ export async function GET(_request: Request, ctx: Context) {
 
 export async function PATCH(request: Request, ctx: Context) {
   const { id, sessionId } = await ctx.params;
+  const existing = getProjectSession(id, sessionId);
+  if (existing?.kind === "scheduled") {
+    return Response.json({ error: "the Scheduled session cannot be renamed" }, { status: 409 });
+  }
   const body = (await request.json().catch(() => null)) as { title?: unknown } | null;
   if (!body || typeof body.title !== "string" || !body.title.trim()) {
     return Response.json({ error: "title is required" }, { status: 400 });
@@ -54,6 +58,12 @@ export async function DELETE(_request: Request, ctx: Context) {
     if (result.kind === "last_session") {
       return Response.json(
         { error: "a project must keep at least one session" },
+        { status: 409 },
+      );
+    }
+    if (result.kind === "protected_session") {
+      return Response.json(
+        { error: "the Scheduled session cannot be deleted" },
         { status: 409 },
       );
     }

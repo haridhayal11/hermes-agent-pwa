@@ -53,38 +53,50 @@ export function AppShell({
   const [searchOpen, setSearchOpen] = useState(false);
   const router = useRouter();
 
-  // Direct links also participate in the shared active-session contract.
+  // Record the normal-chat fallback without making navigation shared across
+  // devices. Scheduled selections deliberately leave that fallback alone.
   useEffect(() => {
-    if (!activeProject || !activeSessionId || activeProject.session_id === activeSessionId) {
-      return;
-    }
+    if (!activeProject || !activeSessionId) return;
     void fetch(
       `/api/projects/${activeProject.id}/sessions/${activeSessionId}/select`,
       { method: "POST" },
     );
   }, [activeProject, activeSessionId]);
 
-  // Another browser or the native app may select a different branch. Follow
-  // the durable change stream rather than waiting for a focus refresh.
+  // Shared data changes refresh the shell, but another device's navigation
+  // must never replace this device's route. Deletion is the exception only
+  // when the session visible here no longer exists.
   useEffect(() => {
     const source = new EventSource("/api/changes");
     source.addEventListener("change", (raw) => {
       try {
         const event = JSON.parse((raw as MessageEvent).data) as {
           type?: string;
-          payload?: { projectId?: string; sessionId?: string };
+          payload?: {
+            projectId?: string;
+            deletedSessionIds?: string[];
+            replacementSessionId?: string;
+          };
         };
         const payload = event.payload;
+        const deletedSessionIds = payload?.deletedSessionIds;
+        const replacementSessionId = payload?.replacementSessionId;
         if (
-          event.type === "session.selected" &&
+          event.type === "session.deleted" &&
           payload?.projectId === activeId &&
-          payload?.sessionId &&
-          payload.sessionId !== activeSessionId
+          activeSessionId &&
+          deletedSessionIds?.includes(activeSessionId) &&
+          replacementSessionId
         ) {
-          router.replace(`/p/${activeId}/s/${payload.sessionId}`);
+          router.replace(`/p/${activeId}/s/${replacementSessionId}`);
           return;
         }
-        if (event.type === "sync.reset" || event.type?.endsWith(".changed")) {
+        if (
+          event.type === "sync.reset" ||
+          event.type === "session.deleted" ||
+          event.type?.startsWith("cron.") ||
+          event.type?.endsWith(".changed")
+        ) {
           router.refresh();
         }
       } catch {
@@ -140,6 +152,7 @@ export function AppShell({
                 <div className="flex items-center">
                   <HeaderMenu
                     project={activeProject}
+                    activeSessionId={activeSessionId}
                     onSearch={() => setSearchOpen(true)}
                   />
                   <button

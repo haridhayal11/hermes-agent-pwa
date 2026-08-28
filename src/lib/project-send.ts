@@ -1,7 +1,7 @@
 import type { Attachment } from "./chat-types";
 import { runManager } from "./run-manager";
 
-function parseAttachments(raw: unknown): Attachment[] {
+export function parseAttachments(raw: unknown): Attachment[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((item): Attachment[] => {
     if (!item || typeof item !== "object") return [];

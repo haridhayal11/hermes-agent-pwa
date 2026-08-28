@@ -58,6 +58,8 @@ export function Composer({
   onThinkingChange,
   features,
   errorNonce = 0,
+  placeholder,
+  commandsEnabled = true,
 }: {
   /** the upload route needs it to decide where a non-image file lands */
   projectId: string;
@@ -87,6 +89,8 @@ export function Composer({
   features: HermesFeatures;
   /** bump to shake the bar — a send that didn't land */
   errorNonce?: number;
+  placeholder?: string;
+  commandsEnabled?: boolean;
 }) {
   const { prefs } = usePreferences();
   const agentName = useAgentName();
@@ -159,7 +163,7 @@ export function Composer({
     const text = draft.trim();
 
     /* A leading slash is one of three things. */
-    const parsed = parseCommand(text);
+    const parsed = commandsEnabled ? parseCommand(text) : undefined;
     if (parsed && (!parsed.command.requires || features[parsed.command.requires])) {
       // 1. Ours to carry out.
       const { command, rest } = parsed;
@@ -174,7 +178,7 @@ export function Composer({
       return;
     }
 
-    if (!parsed) {
+    if (commandsEnabled && !parsed) {
       /* 2. A real Hermes command we can't run. Hermes routes none of them over
        * :8642, so sending it would spend a whole turn handing the model five
        * literal characters. Say so and keep the draft, rather than letting the
@@ -424,11 +428,11 @@ export function Composer({
               }
             }}
             placeholder={
-              running
+              placeholder ?? (running
                 ? features.run_steer
                   ? "Steer the run…"
                   : "Queue a follow-up…"
-                : `Message ${agentName}…`
+                : `Message ${agentName}…`)
             }
             aria-label="Prompt"
             className="min-h-8 w-full min-w-0 resize-none bg-transparent

@@ -74,7 +74,9 @@ export interface HermesSession {
 }
 
 export interface HermesMessage {
-  id?: string;
+  // Hermes releases in the wild have emitted both JSON strings and numbers.
+  // Native API responses canonicalise this to a string at our boundary.
+  id?: string | number;
   session_id?: string;
   role: string;
   content?: string;

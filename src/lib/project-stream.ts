@@ -17,6 +17,7 @@ function subscribeProject(
   controller: ReadableStreamDefaultController<Uint8Array>,
   encoder: TextEncoder,
   projectId: string,
+  sessionId?: string,
 ): () => void {
   return runManager.subscribeProject(projectId, (event) => {
     try {
@@ -26,7 +27,7 @@ function subscribeProject(
     } catch {
       // already closed
     }
-  });
+  }, sessionId);
 }
 
 const HEADERS = {
@@ -66,7 +67,12 @@ export async function streamProjectRun(
         const keepalive = setInterval(() => {
           controller.enqueue(encoder.encode(": keepalive\n\n"));
         }, 25_000);
-        const unsubscribeProject = subscribeProject(controller, encoder, projectId);
+        const unsubscribeProject = subscribeProject(
+          controller,
+          encoder,
+          projectId,
+          sessionId,
+        );
         request.signal.addEventListener(
           "abort",
           () => {
@@ -106,7 +112,12 @@ export async function streamProjectRun(
         }
       };
       unsubscribeRun = runManager.subscribe(runId, afterSeq, send);
-      const unsubscribeProject = subscribeProject(controller, encoder, projectId);
+      const unsubscribeProject = subscribeProject(
+        controller,
+        encoder,
+        projectId,
+        sessionId,
+      );
       const keepalive = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(": keepalive\n\n"));

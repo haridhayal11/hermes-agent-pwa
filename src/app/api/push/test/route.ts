@@ -1,10 +1,10 @@
 import { APP_NAME, APP_SLUG } from "@/lib/branding";
-import { pushConfigured, sendToAll, subscriptionCount } from "@/lib/push";
+import { notificationsConfigured, sendToAll, subscriptionCount } from "@/lib/push";
 
 export async function POST() {
-  if (!pushConfigured) {
+  if (!notificationsConfigured) {
     return Response.json(
-      { error: "VAPID keys are not configured on the server" },
+      { error: "No push provider is configured on the server" },
       { status: 503 },
     );
   }

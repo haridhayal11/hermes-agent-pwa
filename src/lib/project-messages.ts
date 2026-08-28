@@ -1,48 +1,7 @@
 import { db } from "./db";
-import { hermes, type HermesMessage } from "./hermes";
-import { deliveriesFor, type CronDelivery } from "./cron-watcher";
-
-function messageTime(message: HermesMessage): number | null {
-  const raw = message.timestamp;
-  if (typeof raw === "number") return raw < 1e12 ? raw * 1000 : raw;
-  if (typeof raw === "string") {
-    const parsed = Date.parse(raw);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return null;
-}
-
-function asMessage(delivery: CronDelivery) {
-  return {
-    id: delivery.id,
-    role: "cron" as const,
-    content: delivery.body,
-    cron: {
-      jobId: delivery.job_id,
-      jobName: delivery.job_name,
-      status: delivery.status,
-      ts: delivery.ts,
-    },
-  };
-}
-
-function merge(messages: HermesMessage[], deliveries: CronDelivery[]) {
-  if (deliveries.length === 0) return messages as unknown[];
-  const out: unknown[] = [];
-  let next = 0;
-  for (const message of messages) {
-    const at = messageTime(message);
-    if (at !== null) {
-      while (next < deliveries.length && deliveries[next].ts <= at) {
-        out.push(asMessage(deliveries[next]));
-        next += 1;
-      }
-    }
-    out.push(message);
-  }
-  for (; next < deliveries.length; next += 1) out.push(asMessage(deliveries[next]));
-  return out;
-}
+import { hermes } from "./hermes";
+import { deliveriesFor } from "./cron-watcher";
+import { mergeProjectMessages } from "./message-normalization";
 
 export async function messagesForSession(projectId: string, sessionId: string) {
   const session = db
@@ -52,7 +11,7 @@ export async function messagesForSession(projectId: string, sessionId: string) {
     .get(projectId, sessionId);
   if (!session) return null;
   const response = await hermes.getMessages(sessionId);
-  return merge(response.data, deliveriesFor(projectId, sessionId));
+  return mergeProjectMessages(response.data, deliveriesFor(projectId, sessionId));
 }
 
 export async function messagePageResponse(

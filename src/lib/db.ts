@@ -31,6 +31,7 @@ function openDb(): Database.Database {
       instructions TEXT,
       pinned INTEGER NOT NULL DEFAULT 0,
       session_id TEXT NOT NULL,
+      last_chat_session_id TEXT,
       created_at INTEGER NOT NULL,
       last_active_at INTEGER NOT NULL,
       archived INTEGER NOT NULL DEFAULT 0
@@ -51,8 +52,8 @@ function openDb(): Database.Database {
 
     /* A project is shared context (cwd, instructions, skills and model), while
      * sessions are the durable conversations displayed below it in both
-     * clients. projects.session_id remains the shared active pointer so old
-     * browser routes keep working during the v1 migration. */
+     * clients. projects.session_id remains a server fallback pointer so old
+     * browser routes keep working during the v1 migration; it is not UI state. */
     CREATE TABLE IF NOT EXISTS project_sessions (
       session_id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -60,7 +61,8 @@ function openDb(): Database.Database {
       parent_session_id TEXT REFERENCES project_sessions(session_id) ON DELETE CASCADE,
       created_at INTEGER NOT NULL,
       last_active_at INTEGER NOT NULL,
-      archived INTEGER NOT NULL DEFAULT 0
+      archived INTEGER NOT NULL DEFAULT 0,
+      kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat', 'scheduled'))
     );
     CREATE INDEX IF NOT EXISTS idx_project_sessions_project
       ON project_sessions(project_id, archived, last_active_at);
@@ -139,10 +141,22 @@ function openDb(): Database.Database {
       status TEXT NOT NULL,
       body TEXT NOT NULL,
       source_path TEXT,
-      ts INTEGER NOT NULL
+      ts INTEGER NOT NULL,
+      read_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_cron_deliveries_project
       ON cron_deliveries(project_id, session_id, ts);
+
+    /* A normal discussion can be started from one scheduled report without
+     * moving that report out of the project's Scheduled inbox. The link makes
+     * the report both visible and available as model context in the new chat. */
+    CREATE TABLE IF NOT EXISTS cron_discussions (
+      session_id TEXT PRIMARY KEY REFERENCES project_sessions(session_id) ON DELETE CASCADE,
+      delivery_id TEXT NOT NULL REFERENCES cron_deliveries(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_cron_discussions_delivery
+      ON cron_discussions(delivery_id);
 
     /* Install-wide settings — the ones the *server* has to be able to read.
      *
@@ -172,6 +186,20 @@ function openDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_api_devices_active
       ON api_devices(token_hash) WHERE revoked_at IS NULL;
+
+    /* Firebase Cloud Messaging registrations belong to an authenticated native
+     * device. A device has one current Firebase Installation ID; registering a
+     * rotated ID replaces the former target instead of leaving two phones that
+     * are really the same installation in the fan-out. */
+    CREATE TABLE IF NOT EXISTS native_push_subscriptions (
+      device_id TEXT PRIMARY KEY REFERENCES api_devices(id) ON DELETE CASCADE,
+      installation_id TEXT NOT NULL UNIQUE,
+      kinds_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_native_push_installation
+      ON native_push_subscriptions(installation_id);
 
     CREATE TABLE IF NOT EXISTS api_pairing_codes (
       id TEXT PRIMARY KEY,
@@ -216,6 +244,8 @@ function migrate(db: Database.Database) {
   addColumn(db, "projects", "provider", "TEXT");
   // JSON of Hermes model_options: {reasoning:{enabled,effort}, fast}
   addColumn(db, "projects", "model_options", "TEXT");
+  addColumn(db, "projects", "last_chat_session_id", "TEXT");
+  addColumn(db, "project_sessions", "kind", "TEXT NOT NULL DEFAULT 'chat'");
   addColumn(db, "queued_messages", "session_id", "TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_queued_session
     ON queued_messages(project_id, session_id, created_at)`);
@@ -226,7 +256,34 @@ function migrate(db: Database.Database) {
   dedupeCronDeliveries(db);
   dropBindingNotify(db);
   backfillProjectSessions(db);
+  backfillLastChatSessionIds(db);
+  migrateCronReadState(db);
   backfillQueuedSessionIds(db);
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_sessions_scheduled
+      ON project_sessions(project_id) WHERE kind = 'scheduled';
+    CREATE INDEX IF NOT EXISTS idx_cron_deliveries_unread
+      ON cron_deliveries(project_id, session_id, read_at);
+    CREATE TRIGGER IF NOT EXISTS project_sessions_kind_insert
+      BEFORE INSERT ON project_sessions
+      WHEN NEW.kind NOT IN ('chat', 'scheduled')
+      BEGIN SELECT RAISE(ABORT, 'invalid project session kind'); END;
+    CREATE TRIGGER IF NOT EXISTS project_sessions_kind_update
+      BEFORE UPDATE OF kind ON project_sessions
+      WHEN NEW.kind NOT IN ('chat', 'scheduled')
+      BEGIN SELECT RAISE(ABORT, 'invalid project session kind'); END;
+  `);
+}
+
+/** Existing reports stay exactly where they were and must not become unread
+ * merely because an upgrade introduced read tracking. */
+function migrateCronReadState(db: Database.Database) {
+  const columns = db.prepare(`PRAGMA table_info(cron_deliveries)`).all() as {
+    name: string;
+  }[];
+  if (columns.some((column) => column.name === "read_at")) return;
+  addColumn(db, "cron_deliveries", "read_at", "INTEGER");
+  db.exec(`UPDATE cron_deliveries SET read_at = ts WHERE read_at IS NULL`);
 }
 
 /**
@@ -275,6 +332,27 @@ function backfillProjectSessions(db: Database.Database) {
     `UPDATE project_sessions SET created_at = ?, last_active_at = ?
       WHERE created_at IS NULL OR last_active_at IS NULL`,
   ).run(now, now);
+}
+
+function backfillLastChatSessionIds(db: Database.Database) {
+  db.exec(`
+    UPDATE projects
+       SET last_chat_session_id = COALESCE(
+         last_chat_session_id,
+         CASE WHEN EXISTS (
+           SELECT 1 FROM project_sessions ps
+            WHERE ps.project_id = projects.id
+              AND ps.session_id = projects.session_id
+              AND ps.kind = 'chat'
+         ) THEN session_id END,
+         (
+           SELECT ps.session_id FROM project_sessions ps
+            WHERE ps.project_id = projects.id AND ps.kind = 'chat'
+            ORDER BY ps.last_active_at DESC, ps.created_at DESC LIMIT 1
+         )
+       )
+     WHERE last_chat_session_id IS NULL;
+  `);
 }
 
 function backfillQueuedSessionIds(db: Database.Database) {

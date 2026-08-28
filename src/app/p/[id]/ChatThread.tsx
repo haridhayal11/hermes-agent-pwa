@@ -36,7 +36,12 @@ import { useStatus } from "@/hooks/useStatus";
 import { useModels } from "@/hooks/useModels";
 import { IconChevronDown, IconRetry } from "@/components/primitives/icons";
 import type { SlashCommand } from "@/lib/commands";
-import type { Project, ProjectSession, ThreadMessage } from "@/lib/chat-types";
+import type {
+  Attachment,
+  Project,
+  ProjectSession,
+  ThreadMessage,
+} from "@/lib/chat-types";
 
 /** The column is JSON; a corrupt value must not take the thread down with it. */
 function parseModelOptions(raw: string | null): ModelOptions {
@@ -58,6 +63,7 @@ export function ChatThread({
   initialMessages: ThreadMessage[];
 }) {
   const projectId = project.id;
+  const scheduled = session.kind === "scheduled";
   const thread = useThread(projectId, session.session_id, initialMessages);
   const {
     messages,
@@ -90,6 +96,8 @@ export function ChatThread({
   const [modelOpen, setModelOpen] = useState(false);
   const [toolsetsOpen, setToolsetsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scheduledSending, setScheduledSending] = useState(false);
+  const readThroughRef = useRef<string | null>(null);
   // Optimistic: the picker has to feel instant, and the row is written behind
   // it. A failed PATCH is reported by the toast, not by a reverting chip.
   const [selection, setSelection] = useState<ModelSelection>({
@@ -149,6 +157,59 @@ export function ChatThread({
 
   const running = phase !== "idle";
   const stopping = phase === "stopping";
+  const latestScheduled = messages.findLast((message) => message.role === "cron");
+
+  const markScheduledRead = useCallback(async () => {
+    if (!scheduled || document.visibilityState !== "visible") return;
+    const deliveryId = latestScheduled?.id ?? null;
+    if (readThroughRef.current === deliveryId) return;
+    const response = await fetch(`/api/projects/${projectId}/scheduled/read`, {
+      method: "POST",
+    });
+    if (!response.ok) return;
+    readThroughRef.current = deliveryId;
+    router.refresh();
+  }, [latestScheduled?.id, projectId, router, scheduled]);
+
+  useEffect(() => {
+    if (!scheduled) return;
+    void markScheduledRead();
+    const onVisibility = () => void markScheduledRead();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [markScheduledRead, scheduled]);
+
+  const replyToScheduled = useCallback(
+    async (text: string, attachments: Attachment[]) => {
+      if (!latestScheduled || scheduledSending) return;
+      setScheduledSending(true);
+      try {
+        const response = await fetch(`/api/projects/${projectId}/scheduled/reply`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            deliveryId: latestScheduled.id,
+            text,
+            attachments,
+          }),
+        });
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          session?: { id: string };
+        };
+        if (body.session?.id) {
+          router.push(`/p/${projectId}/s/${body.session.id}`);
+          return;
+        }
+        raiseError(body.error ?? "Could not start the discussion");
+      } catch {
+        raiseError("Network unreachable");
+      } finally {
+        setScheduledSending(false);
+      }
+    },
+    [latestScheduled, projectId, raiseError, router, scheduledSending],
+  );
 
   /* The chip drives model_options.reasoning on the run, so it is scoped to
    * whatever will actually run — the pinned model, else the gateway's own.
@@ -371,7 +432,9 @@ export function ChatThread({
         <div className="px-safe mx-auto flex w-full max-w-3xl flex-col gap-5 pt-4 pb-2">
           {messages.length === 0 && !running && (
             <p className="py-10 text-center text-label text-ink-3">
-              Nothing here yet. This thread stays put — come back to it whenever.
+              {scheduled
+                ? "Scheduled reports for this project will appear here."
+                : "Nothing here yet. This thread stays put — come back to it whenever."}
             </p>
           )}
 
@@ -472,21 +535,36 @@ export function ChatThread({
 
       <Composer
         projectId={projectId}
-        onSend={thread.send}
+        onSend={scheduled ? replyToScheduled : thread.send}
         onStop={stop}
         onCommand={(command, rest) => void onCommand(command, rest)}
         onUnavailable={raiseError}
-        running={running}
+        running={scheduled ? false : running}
         stopping={stopping}
         features={features}
         /* "default" while the inventory is still in flight, rather than no
          * chip at all — otherwise the only way into the picker appears late,
          * or never if Hermes is unreachable. */
-        modelLabel={effectiveModel ?? (features.model_options ? "default" : null)}
-        onPickModel={features.model_options ? () => setModelOpen(true) : undefined}
-        thinkingEffort={supportsReasoning ? effortOf(selection.modelOptions) : undefined}
-        onThinkingChange={setThinking}
+        modelLabel={
+          scheduled ? null : effectiveModel ?? (features.model_options ? "default" : null)
+        }
+        onPickModel={
+          !scheduled && features.model_options ? () => setModelOpen(true) : undefined
+        }
+        thinkingEffort={
+          !scheduled && supportsReasoning ? effortOf(selection.modelOptions) : undefined
+        }
+        onThinkingChange={scheduled ? undefined : setThinking}
         errorNonce={errorSeq}
+        disabled={scheduled && (!latestScheduled || scheduledSending)}
+        placeholder={
+          scheduled
+            ? latestScheduled
+              ? "Reply to latest report"
+              : "Waiting for the first scheduled report…"
+            : undefined
+        }
+        commandsEnabled={!scheduled}
       />
 
       <ModelPicker
@@ -499,11 +577,14 @@ export function ChatThread({
         onRefresh={() => void refresh()}
       />
       <ToolsetsSheet open={toolsetsOpen} onClose={() => setToolsetsOpen(false)} />
-      <ProjectSettingsSheet
-        project={project}
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-      />
+      {!scheduled && (
+        <ProjectSettingsSheet
+          project={project}
+          sessionId={session.session_id}
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </>
   );
 }

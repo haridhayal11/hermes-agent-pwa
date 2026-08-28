@@ -71,6 +71,7 @@ function subscribeProject(
   controller: ReadableStreamDefaultController<Uint8Array>,
   encoder: TextEncoder,
   projectId: string,
+  sessionId?: string,
 ): () => void {
   return runManager.subscribeProject(projectId, (raw) => {
     try {
@@ -90,7 +91,7 @@ function subscribeProject(
     } catch {
       // The client closed between the event being emitted and enqueued.
     }
-  });
+  }, sessionId);
 }
 
 function streamHeaders() {
@@ -144,7 +145,12 @@ async function streamVersionedEvents(
             clearInterval(keepalive);
           }
         }, 25_000);
-        const unsubscribeProject = subscribeProject(controller, encoder, projectId);
+        const unsubscribeProject = subscribeProject(
+          controller,
+          encoder,
+          projectId,
+          sessionId,
+        );
 
         const close = () => {
           clearInterval(keepalive);

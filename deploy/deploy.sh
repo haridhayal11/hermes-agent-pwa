@@ -35,8 +35,8 @@ ssh -o BatchMode=yes -o ConnectTimeout=10 "$TARGET" bash -seu <<REMOTE
 $NVM_PRELUDE
 command -v node >/dev/null || { echo "node not installed on target" >&2; exit 1; }
 node_major=\$(node -p 'process.versions.node.split(".")[0]')
-if (( node_major < 20 )); then
-  echo "Next 16 needs Node 20.9+; target has \$(node -v)" >&2
+if (( node_major < 22 )); then
+  echo "Hermes PWA and Firebase Admin need Node 22+; target has \$(node -v)" >&2
   exit 1
 fi
 command -v pnpm >/dev/null || { echo "pnpm not installed on target (npm i -g pnpm)" >&2; exit 1; }
@@ -54,12 +54,17 @@ if ! grep -Eq '^VAPID_PRIVATE_KEY=.+' "$APP_DIR/.env.production" 2>/dev/null; th
   echo "WARNING: no VAPID_PRIVATE_KEY in $APP_DIR/.env.production" >&2
   echo "         notifications will be disabled (npx web-push generate-vapid-keys)" >&2
 fi
+if ! grep -Eq '^FIREBASE_PROJECT_ID=.+' "$APP_DIR/.env.production" 2>/dev/null; then
+  echo "WARNING: FIREBASE_PROJECT_ID is not configured" >&2
+  echo "         native Android notifications will be disabled" >&2
+fi
 REMOTE
 
 say "Syncing source to $TARGET:$APP_DIR"
 ssh "$TARGET" "mkdir -p '$APP_DIR'"
 # Source only. node_modules and .next are built on the target; .env.production
-# and the SQLite state DB live there and must never be clobbered by a deploy.
+# and the SQLite state DB (including its WAL/SHM journal files) live there and
+# must never be clobbered by a deploy.
 rsync -az --delete \
   --exclude '.git' \
   --exclude 'node_modules' \
@@ -67,6 +72,7 @@ rsync -az --delete \
   --exclude 'android' \
   --exclude '.env*' \
   --exclude '*.db' \
+  --exclude '*.db-*' \
   "$REPO_ROOT/" "$TARGET:$APP_DIR/"
 
 say "Installing and building on target"

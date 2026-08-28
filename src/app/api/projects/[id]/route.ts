@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { hermes, HermesApiError } from "@/lib/hermes";
 import { publishChange } from "@/lib/api-changes";
-import { listProjectSessions } from "@/lib/project-sessions";
+import { listProjectSessions, withProjectNavigation } from "@/lib/project-sessions";
 
 export async function GET(_req: Request, ctx: RouteContext<"/api/projects/[id]">) {
   const { id } = await ctx.params;
@@ -20,7 +20,7 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/projects/[id]">
   } catch {
     /* Hermes unreachable — the sheet just omits the count */
   }
-  return Response.json({ project, messageCount });
+  return Response.json({ project: withProjectNavigation(project), messageCount });
 }
 
 export async function PATCH(req: Request, ctx: RouteContext<"/api/projects/[id]">) {
@@ -97,7 +97,9 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/projects/[id]"
 
   const updated = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id);
   if (updates.length > 0) publishChange("project.changed", { projectId: id });
-  return Response.json({ project: updated });
+  return Response.json({
+    project: withProjectNavigation(updated as { id: string }),
+  });
 }
 
 /**

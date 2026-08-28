@@ -7,6 +7,8 @@ import { db } from "./db";
 import { hermes, type HermesJob } from "./hermes";
 import { runManager } from "./run-manager";
 import { sendToAll } from "./push";
+import { ensureScheduledSession } from "./project-sessions";
+import { publishChange } from "./api-changes";
 
 /* Scheduled jobs, delivered into a project.
  *
@@ -25,9 +27,9 @@ import { sendToAll } from "./push";
  * construction — that is the whole reason the middle tier exists — so the file
  * is simply there to be read.
  *
- * The consequence worth stating: a binding is not a delivery target. Binding a
- * project to a job that already posts to Telegram adds this app to it rather than
- * taking Telegram away, because we never touch the job's `deliver` field.
+ * Binding routes make the app the job's single destination by setting Hermes'
+ * delivery mode to local. The watcher then turns each saved output file into
+ * one durable report in the project's Scheduled inbox.
  */
 
 const POLL_MS = 30_000;
@@ -61,6 +63,7 @@ export interface CronDelivery {
   body: string;
   source_path: string | null;
   ts: number;
+  read_at: number | null;
 }
 
 /**
@@ -87,7 +90,24 @@ function isPathStamp(value: string): boolean {
 }
 
 /** Milliseconds for the fire, from whichever timestamp the job carries. */
-function firedAt(job: HermesJob): number {
+function firedAt(job: HermesJob, file?: string): number {
+  if (file) {
+    const match = path.basename(file).match(
+      /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})\.md$/,
+    );
+    if (match) {
+      const [, year, month, day, hour, minute, second] = match;
+      const fromName = new Date(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second),
+      ).getTime();
+      if (!Number.isNaN(fromName)) return fromName;
+    }
+  }
   const raw = job.latest_execution?.finished_at || job.last_run_at;
   const parsed = raw ? Date.parse(raw) : NaN;
   return Number.isNaN(parsed) ? Date.now() : parsed;
@@ -159,16 +179,40 @@ export function plainText(markdown: string): string {
  * preferring over mtime, which an rsync or a backup restore can rewrite.
  */
 function newestOutputFile(jobId: string): string | null {
+  const candidates = outputFiles(jobId);
+  return candidates[candidates.length - 1] ?? null;
+}
+
+function outputFiles(jobId: string): string[] {
   const dir = outputDirFor(jobId);
   let entries: string[];
   try {
     entries = fs.readdirSync(dir);
   } catch {
-    return null;
+    return [];
   }
-  const candidates = entries.filter((f) => f.endsWith(".md")).sort();
-  const newest = candidates[candidates.length - 1];
-  return newest ? path.join(dir, newest) : null;
+  return entries
+    .filter((file) => file.endsWith(".md"))
+    .sort()
+    .map((file) => path.join(dir, file));
+}
+
+export function planOutputFiles(
+  files: string[],
+  lastSeenAt: string | null,
+): { adopt: string | null; pending: string[] } {
+  const ordered = [...files].sort();
+  const newest = ordered[ordered.length - 1];
+  if (!newest || newest === lastSeenAt) return { adopt: null, pending: [] };
+  const shouldAdopt =
+    lastSeenAt === null || (lastSeenAt !== "" && !isPathStamp(lastSeenAt));
+  if (shouldAdopt) return { adopt: newest, pending: [] };
+  return {
+    adopt: null,
+    pending: lastSeenAt
+      ? ordered.filter((file) => file > lastSeenAt)
+      : ordered,
+  };
 }
 
 export function listBindings(): CronBinding[] {
@@ -217,18 +261,24 @@ export function deliveriesFor(projectId: string, sessionId: string): CronDeliver
   return db
     .prepare(
       `SELECT * FROM cron_deliveries
-        WHERE project_id = ? AND session_id = ? ORDER BY ts ASC`,
+        WHERE (project_id = ? AND session_id = ?)
+           OR id IN (
+             SELECT delivery_id FROM cron_discussions WHERE session_id = ?
+           )
+        ORDER BY ts ASC`,
     )
-    .all(projectId, sessionId) as CronDelivery[];
+    .all(projectId, sessionId, sessionId) as CronDelivery[];
 }
 
 async function deliver(job: HermesJob, binding: CronBinding, file: string) {
   const project = db
-    .prepare(`SELECT name, session_id FROM projects WHERE id = ?`)
-    .get(binding.project_id) as { name: string; session_id: string } | undefined;
+    .prepare(`SELECT name FROM projects WHERE id = ?`)
+    .get(binding.project_id) as { name: string } | undefined;
   // The binding is ON DELETE CASCADE, so this only happens in the window
   // between a project being deleted and the tick that noticed.
   if (!project) return;
+  const scheduled = await ensureScheduledSession(binding.project_id);
+  if (!scheduled) return;
 
   /* turbopackIgnore silences the build-time warning about dynamic filesystem
    * access. The path genuinely is dynamic and genuinely is outside the
@@ -244,12 +294,13 @@ async function deliver(job: HermesJob, binding: CronBinding, file: string) {
     id: `cd_${randomUUID()}`,
     job_id: job.id,
     project_id: binding.project_id,
-    session_id: project.session_id,
+    session_id: scheduled.session_id,
     job_name: job.name,
     status,
     body,
     source_path: file,
-    ts: firedAt(job),
+    ts: firedAt(job, file),
+    read_at: null,
   };
 
   // OR IGNORE against the unique index on (job_id, source_path): the stamp is
@@ -281,12 +332,20 @@ async function deliver(job: HermesJob, binding: CronBinding, file: string) {
     );
     db.prepare(
       `UPDATE project_sessions SET last_active_at = ? WHERE session_id = ?`,
-    ).run(activeAt, project.session_id);
+    ).run(activeAt, scheduled.session_id);
   })();
 
   // Live, for a thread that happens to be open. The durable copy is the row
   // above, which the history route merges back in on reload.
-  runManager.emitProject(binding.project_id, { event: "cron.delivered", delivery });
+  runManager.emitProject(binding.project_id, scheduled.session_id, {
+    event: "cron.delivered",
+    delivery,
+  });
+  publishChange("cron.delivered", {
+    projectId: binding.project_id,
+    sessionId: scheduled.session_id,
+    deliveryId: delivery.id,
+  });
 
   /* Always. A bound job delivers here and nowhere else — the routes force
    * `deliver: "local"` on it — so this is the only thing that will announce
@@ -298,7 +357,7 @@ async function deliver(job: HermesJob, binding: CronBinding, file: string) {
       status === "failed"
         ? `${job.name} failed.`
         : `${job.name}: ${plainText(body).slice(0, 140)}`,
-    url: `/p/${binding.project_id}/s/${project.session_id}`,
+    url: `/p/${binding.project_id}/s/${scheduled.session_id}`,
     // Its own tag: a scheduled result arriving overnight must not silently
     // replace the notification for the run you were watching before bed.
     tag: `${APP_SLUG}-job-${binding.project_id}`,
@@ -318,24 +377,44 @@ export async function tick(): Promise<void> {
   const byId = new Map(jobs.map((job) => [job.id, job]));
 
   for (const binding of bindings) {
+    try {
+      // Upgrade-era bindings may predate the Scheduled inbox. Repair them on
+      // the first healthy watcher pass even when no new output is waiting.
+      await ensureScheduledSession(binding.project_id);
+    } catch (err) {
+      console.error(`[cron] scheduled inbox repair failed for job ${binding.job_id}:`, err);
+      continue;
+    }
     const job = byId.get(binding.job_id);
     // The job was deleted in the CLI, or this gateway isn't the one that has
     // it. Leave the binding — the deliveries it already made are still real,
     // and the jobs screen shows it as missing rather than silently dropping it.
     if (!job) continue;
 
-    const fired = fireKey(job);
-    if (!fired || fired === binding.last_seen_at) continue;
+    const files = outputFiles(job.id);
+    const plan = planOutputFiles(files, binding.last_seen_at);
+    if (!plan.adopt && plan.pending.length === 0) continue;
 
     try {
       /* Deliver unless this binding has never resolved a real fire. Two cases
        * adopt silently instead: a row written with no stamp at all, and a row
        * still carrying the old timestamp stamp, which cannot be compared
        * against a path and would otherwise re-deliver whatever is newest. */
-      const adopt =
-        binding.last_seen_at === null ||
-        (binding.last_seen_at !== "" && !isPathStamp(binding.last_seen_at));
-      if (!adopt) await deliver(job, binding, fired);
+      if (plan.adopt) {
+        db.prepare(`UPDATE cron_bindings SET last_seen_at = ? WHERE job_id = ?`).run(
+          plan.adopt,
+          binding.job_id,
+        );
+        continue;
+      }
+
+      for (const file of plan.pending) {
+        await deliver(job, binding, file);
+        db.prepare(`UPDATE cron_bindings SET last_seen_at = ? WHERE job_id = ?`).run(
+          file,
+          binding.job_id,
+        );
+      }
     } catch (err) {
       console.error(`[cron] delivery failed for job ${job.id}:`, err);
       // Deliberately no stamp: leaving last_seen_at behind means the next tick
@@ -343,10 +422,6 @@ export async function tick(): Promise<void> {
       continue;
     }
 
-    db.prepare(`UPDATE cron_bindings SET last_seen_at = ? WHERE job_id = ?`).run(
-      fired,
-      binding.job_id,
-    );
   }
 }
 

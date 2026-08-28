@@ -38,9 +38,10 @@ and combines the digest with stable file metadata for replay protection.
 
 Project sessions have their own replay stream at
 `/projects/{projectId}/sessions/{sessionId}/events`. The project resource's
-`activeSessionId` is a shared pointer used by Android, the PWA, and scheduled
-job delivery. An offline prompt always remains pinned to the session in its
-URL and must not change that pointer while draining.
+`lastChatSessionId` is the shared fallback for project entry; the screen each
+client currently has open remains local to that client. Projects with unread
+scheduled reports resolve to their protected `scheduledSessionId` instead.
+An offline prompt always remains pinned to its original session while draining.
 
 `GET /api/v1/changes` is a second SSE stream for resource invalidation. Its
 integer cursor is unrelated to `<runId>:<sequence>`. If the retained window no

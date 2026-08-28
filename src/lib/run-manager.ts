@@ -71,6 +71,23 @@ interface RunRow {
   prompt_preview: string | null;
 }
 
+interface ScheduledReportContext {
+  job_name: string;
+  status: string;
+  body: string;
+  ts: number;
+}
+
+export function scheduledReportHistoryEntry(
+  report: ScheduledReportContext,
+): ConversationHistoryEntry {
+  const label = report.status === "failed" ? "failed scheduled report" : "scheduled report";
+  return {
+    role: "assistant",
+    content: `[${label} from "${report.job_name}" at ${new Date(report.ts).toISOString()}]\n${report.body}`,
+  };
+}
+
 /**
  * Builds the run's `input`.
  *
@@ -158,17 +175,22 @@ class RunManager extends EventEmitter {
    * because the durable copy is a cron_deliveries row that the history route
    * merges in on reload.
    */
-  emitProject(projectId: string, event: Record<string, unknown>) {
+  emitProject(projectId: string, sessionId: string, event: Record<string, unknown>) {
     this.emit(`project:${projectId}`, event);
+    this.emit(`project:${projectId}:session:${sessionId}`, event);
   }
 
   subscribeProject(
     projectId: string,
     onEvent: (event: Record<string, unknown>) => void,
+    sessionId?: string,
   ): () => void {
     const listener = (event: Record<string, unknown>) => onEvent(event);
-    this.on(`project:${projectId}`, listener);
-    return () => this.off(`project:${projectId}`, listener);
+    const channel = sessionId
+      ? `project:${projectId}:session:${sessionId}`
+      : `project:${projectId}`;
+    this.on(channel, listener);
+    return () => this.off(channel, listener);
   }
 
   getProject(projectId: string): ProjectRow | undefined {
@@ -319,9 +341,18 @@ class RunManager extends EventEmitter {
   private async buildConversationHistory(
     sessionId: string,
   ): Promise<ConversationHistoryEntry[]> {
+    const scheduled = db
+      .prepare(
+        `SELECT d.job_name, d.status, d.body, d.ts
+           FROM cron_discussions c
+           JOIN cron_deliveries d ON d.id = c.delivery_id
+          WHERE c.session_id = ?`,
+      )
+      .get(sessionId) as ScheduledReportContext | undefined;
+    let history: ConversationHistoryEntry[] = [];
     try {
       const res = await hermes.getMessages(sessionId);
-      return res.data
+      history = res.data
         .filter(
           (m) =>
             (m.role === "user" || m.role === "assistant") &&
@@ -330,10 +361,11 @@ class RunManager extends EventEmitter {
         )
         .map((m) => ({ role: m.role, content: m.content as string }));
     } catch {
-      // Brand-new session, or session DB hiccup — start with empty history
-      // rather than fail the send.
-      return [];
+      // Brand-new session, or session DB hiccup — its linked report remains
+      // available even when there is no Hermes transcript to append.
     }
+    if (!scheduled) return history;
+    return [scheduledReportHistoryEntry(scheduled), ...history];
   }
 
   async startRun(

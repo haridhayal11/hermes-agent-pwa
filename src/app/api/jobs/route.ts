@@ -3,6 +3,7 @@ import { hermes, type CreateJobParams, type HermesJob } from "@/lib/hermes";
 import { isCronUnavailable, jobErrorResponse } from "@/lib/job-errors";
 import { fireKey, setBinding } from "@/lib/cron-watcher";
 import { publishChange } from "@/lib/api-changes";
+import { ensureScheduledSession } from "@/lib/project-sessions";
 
 // Live proxy: never cached. A zero-argument GET is prerendered at build time
 // otherwise, and this one would serve an empty job list forever.
@@ -62,6 +63,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (projectId && !(await ensureScheduledSession(projectId))) {
+      return Response.json({ error: "unknown project" }, { status: 400 });
+    }
     const { job } = await hermes.jobs.create({
       name: body.name.trim(),
       schedule: body.schedule.trim(),
