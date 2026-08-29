@@ -80,6 +80,7 @@ export interface HermesMessage {
   session_id?: string;
   role: string;
   content?: string;
+  content_format?: "plain" | "markdown";
   tool_call_id?: string;
   tool_calls?: unknown;
   tool_name?: string;

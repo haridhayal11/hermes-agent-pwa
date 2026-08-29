@@ -28,9 +28,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -67,11 +67,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -100,6 +103,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.haridhayal.hermes.core.data.DevicePreferences
 import com.haridhayal.hermes.core.data.DisclosurePreference
 import com.haridhayal.hermes.core.model.MessageDto
+import com.haridhayal.hermes.core.model.MessageContentFormat
 import com.haridhayal.hermes.core.model.ModelSelectionDto
 import com.haridhayal.hermes.core.model.ModelsResponse
 import com.haridhayal.hermes.core.model.StreamEventDto
@@ -118,6 +122,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ChatScreen(
     projectName: String,
+    sessionId: String,
     sessionTitle: String,
     agentName: String,
     preferences: DevicePreferences,
@@ -144,31 +149,50 @@ fun ChatScreen(
     onDelete: () -> Unit,
     onProjectSettings: () -> Unit,
 ) {
-    var text by remember { mutableStateOf("") }
-    var attachments by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var menu by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf(false) }
-    var modelPickerOpen by remember { mutableStateOf(false) }
-    var thinkingPickerOpen by remember { mutableStateOf(false) }
-    var renamedTitle by remember(sessionTitle) { mutableStateOf(sessionTitle) }
+    var text by remember(sessionId) { mutableStateOf("") }
+    var attachments by remember(sessionId) { mutableStateOf<List<Uri>>(emptyList()) }
+    var menu by remember(sessionId) { mutableStateOf(false) }
+    var renaming by remember(sessionId) { mutableStateOf(false) }
+    var deleting by remember(sessionId) { mutableStateOf(false) }
+    var modelPickerOpen by remember(sessionId) { mutableStateOf(false) }
+    var thinkingPickerOpen by remember(sessionId) { mutableStateOf(false) }
+    var renamedTitle by remember(sessionId, sessionTitle) { mutableStateOf(sessionTitle) }
+    var imagePickerSessionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var filePickerSessionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCaptureSessionId by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingCaptureUri by rememberSaveable { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    val images = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(8)) {
-        attachments = attachments + it
+    val images = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(8)) { selected ->
+        val targetSessionId = imagePickerSessionId
+        imagePickerSessionId = null
+        if (activityResultBelongsToSession(targetSessionId, sessionId)) {
+            attachments = attachments + selected
+        }
     }
-    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {
-        attachments = attachments + it
+    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { selected ->
+        val targetSessionId = filePickerSessionId
+        filePickerSessionId = null
+        if (activityResultBelongsToSession(targetSessionId, sessionId)) {
+            attachments = attachments + selected
+        }
     }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
         val uri = pendingCaptureUri?.let(Uri::parse)
+        val targetSessionId = pendingCaptureSessionId
         pendingCaptureUri = null
-        if (captured && uri != null) {
+        pendingCaptureSessionId = null
+        if (captured && uri != null && activityResultBelongsToSession(targetSessionId, sessionId)) {
             attachments = attachments + uri
         } else if (uri != null) {
             scope.launch(Dispatchers.IO) { CameraCaptureStore.delete(context, uri) }
+        }
+    }
+    val currentAttachments by rememberUpdatedState(attachments)
+    DisposableEffect(sessionId) {
+        onDispose {
+            currentAttachments.forEach { uri -> CameraCaptureStore.delete(context, uri) }
         }
     }
     val colors = composerColors()
@@ -186,7 +210,7 @@ fun ChatScreen(
     val latestScheduledReport = remember(visibleMessages) {
         visibleMessages.lastOrNull { it.role == "cron" && it.id != null }
     }
-    LifecycleResumeEffect(scheduled, latestScheduledReport?.id) {
+    LifecycleResumeEffect(sessionId, scheduled, latestScheduledReport?.id) {
         if (scheduled && latestScheduledReport != null) onScheduledVisible()
         onPauseOrDispose { }
     }
@@ -194,11 +218,11 @@ fun ChatScreen(
         reconcileTranscript(visibleMessages, activityState.streaming, running)
     }
     val displayMessages = presentation.messages
-    var optimisticOutgoing by remember { mutableStateOf<List<PendingOutgoing>>(emptyList()) }
+    var optimisticOutgoing by remember(sessionId) { mutableStateOf<List<PendingOutgoing>>(emptyList()) }
     val transcriptMessages = remember(displayMessages, optimisticOutgoing) {
         withOptimisticOutgoing(displayMessages, optimisticOutgoing)
     }
-    LaunchedEffect(displayMessages, running) {
+    LaunchedEffect(sessionId, displayMessages, running) {
         if (!running) {
             optimisticOutgoing = optimisticOutgoing.filter { pending ->
                 displayMessages.count { it.role == "user" && it.content == pending.text } < pending.occurrence
@@ -206,11 +230,11 @@ fun ChatScreen(
         }
     }
     val displayActivityState = activityState.copy(streaming = presentation.streaming)
-    var submittingApprovalRunId by remember { mutableStateOf<String?>(null) }
-    var hiddenApprovalRunId by remember { mutableStateOf<String?>(null) }
-    var hiddenPinnedQuestionKey by remember { mutableStateOf<String?>(null) }
+    var submittingApprovalRunId by remember(sessionId) { mutableStateOf<String?>(null) }
+    var hiddenApprovalRunId by remember(sessionId) { mutableStateOf<String?>(null) }
+    var hiddenPinnedQuestionKey by remember(sessionId) { mutableStateOf<String?>(null) }
     val approval = displayActivityState.approval?.takeUnless { it.runId == hiddenApprovalRunId }
-    LaunchedEffect(displayActivityState.approval?.runId) {
+    LaunchedEffect(sessionId, displayActivityState.approval?.runId) {
         // A response event clears the source approval. Forget the optimistic
         // hide at that point so a later approval for this run is visible.
         if (displayActivityState.approval == null) {
@@ -236,18 +260,19 @@ fun ChatScreen(
         ?.let { "${it.id ?: "content"}:${it.content}" }
     val pinnedQuestion = pinnedQuestionCandidate
         ?.takeUnless { pinnedQuestionKey == hiddenPinnedQuestionKey }
-    LaunchedEffect(pinnedQuestionKey) {
+    LaunchedEffect(sessionId, pinnedQuestionKey) {
         if (pinnedQuestionKey == null) hiddenPinnedQuestionKey = null
     }
-    val listState = rememberLazyListState()
-    var wasRunning by remember { mutableStateOf(running) }
-    LaunchedEffect(running, preferences.haptics) {
+    val listState = remember(sessionId) { LazyListState() }
+    var wasRunning by remember(sessionId) { mutableStateOf(running) }
+    LaunchedEffect(sessionId, running, preferences.haptics) {
         if (wasRunning && !running && preferences.haptics) {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }
         wasRunning = running
     }
     LaunchedEffect(
+        sessionId,
         transcriptMessages.size,
         displayActivityState.streaming.length,
         displayActivityState.thinking.length,
@@ -267,7 +292,7 @@ fun ChatScreen(
             else listState.animateScrollToItem(last)
         }
     }
-    var forceScrollToBottom by remember { mutableStateOf(0L) }
+    var forceScrollToBottom by remember(sessionId) { mutableStateOf(0L) }
     val sendMessage: (String, List<Uri>) -> Unit = { message, messageAttachments ->
         if (message.isNotBlank()) {
             val occurrence = displayMessages.count { it.role == "user" && it.content == message } +
@@ -277,7 +302,7 @@ fun ChatScreen(
         forceScrollToBottom += 1
         onSend(message, messageAttachments)
     }
-    LaunchedEffect(forceScrollToBottom) {
+    LaunchedEffect(sessionId, forceScrollToBottom) {
         if (forceScrollToBottom > 0) {
             // Wait for the optimistic message/card dismissal to take part in
             // layout, then force the newest conversation state into view.
@@ -371,78 +396,86 @@ fun ChatScreen(
                         }
                     }
                 }
-                ChatComposer(
-                    text = text,
-                    attachments = attachments,
-                    modelLabel = modelSelection?.model ?: "Default",
-                    modelPinned = modelSelection?.model != null,
-                    supportsThinking = modelCapabilities.reasoning,
-                    thinkingEffort = modelSelection.reasoningEffort(),
-                    running = running,
-                    enabled = !scheduled || latestScheduledReport != null,
-                    showModelControls = !scheduled,
-                    placeholder = if (scheduled) "Reply to latest report" else null,
-                    agentName = agentName,
-                    sendOnEnter = preferences.sendOnEnter,
-                    textScale = preferences.textSize.scale,
-                    onTextChange = { text = it },
-                    onChooseImages = {
-                        images.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
-                    onChooseFiles = { files.launch(arrayOf("*/*")) },
-                    onTakePhoto = {
-                        if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
-                            Toast.makeText(context, "Camera unavailable", Toast.LENGTH_SHORT).show()
-                        } else {
-                            runCatching { CameraCaptureStore.createDestination(context) }
-                                .onSuccess { uri ->
-                                    pendingCaptureUri = uri.toString()
-                                    runCatching { camera.launch(uri) }
-                                        .onFailure {
-                                            pendingCaptureUri = null
-                                            scope.launch(Dispatchers.IO) {
-                                                CameraCaptureStore.delete(context, uri)
+                key(sessionId) {
+                    ChatComposer(
+                        text = text,
+                        attachments = attachments,
+                        modelLabel = modelSelection?.model ?: "Default",
+                        modelPinned = modelSelection?.model != null,
+                        supportsThinking = modelCapabilities.reasoning,
+                        thinkingEffort = modelSelection.reasoningEffort(),
+                        running = running,
+                        enabled = !scheduled || latestScheduledReport != null,
+                        showModelControls = !scheduled,
+                        placeholder = if (scheduled) "Reply to latest report" else null,
+                        agentName = agentName,
+                        sendOnEnter = preferences.sendOnEnter,
+                        textScale = preferences.textSize.scale,
+                        onTextChange = { text = it },
+                        onChooseImages = {
+                            imagePickerSessionId = sessionId
+                            images.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
+                        onChooseFiles = {
+                            filePickerSessionId = sessionId
+                            files.launch(arrayOf("*/*"))
+                        },
+                        onTakePhoto = {
+                            if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
+                                Toast.makeText(context, "Camera unavailable", Toast.LENGTH_SHORT).show()
+                            } else {
+                                runCatching { CameraCaptureStore.createDestination(context) }
+                                    .onSuccess { uri ->
+                                        pendingCaptureSessionId = sessionId
+                                        pendingCaptureUri = uri.toString()
+                                        runCatching { camera.launch(uri) }
+                                            .onFailure {
+                                                pendingCaptureSessionId = null
+                                                pendingCaptureUri = null
+                                                scope.launch(Dispatchers.IO) {
+                                                    CameraCaptureStore.delete(context, uri)
+                                                }
+                                                Toast.makeText(
+                                                    context,
+                                                    "Couldn’t open the camera",
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
                                             }
-                                            Toast.makeText(
-                                                context,
-                                                "Couldn’t open the camera",
-                                                Toast.LENGTH_SHORT,
-                                            ).show()
-                                        }
-                                }
-                                .onFailure {
-                                    Toast.makeText(
-                                        context,
-                                        "Couldn’t prepare a photo",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                }
-                        }
-                    },
-                    onRemoveAttachment = { index ->
-                        val removed = attachments.getOrNull(index)
-                        attachments = attachments.filterIndexed { at, _ -> at != index }
-                        if (removed != null) {
-                            scope.launch(Dispatchers.IO) {
-                                CameraCaptureStore.delete(context, removed)
+                                    }
+                                    .onFailure {
+                                        Toast.makeText(
+                                            context,
+                                            "Couldn’t prepare a photo",
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
                             }
-                        }
-                    },
-                    onPickModel = {
-                        modelPickerOpen = true
-                        if (models == null) onRefreshModels()
-                    },
-                    onPickThinking = { thinkingPickerOpen = true },
-                    onStop = onStop,
-                    onSend = {
-                        if (preferences.haptics) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        sendMessage(text, attachments)
-                        text = ""
-                        attachments = emptyList()
-                    },
-                )
+                        },
+                        onRemoveAttachment = { index ->
+                            val removed = attachments.getOrNull(index)
+                            attachments = attachments.filterIndexed { at, _ -> at != index }
+                            if (removed != null) {
+                                scope.launch(Dispatchers.IO) {
+                                    CameraCaptureStore.delete(context, removed)
+                                }
+                            }
+                        },
+                        onPickModel = {
+                            modelPickerOpen = true
+                            if (models == null) onRefreshModels()
+                        },
+                        onPickThinking = { thinkingPickerOpen = true },
+                        onStop = onStop,
+                        onSend = {
+                            if (preferences.haptics) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            sendMessage(text, attachments)
+                            text = ""
+                            attachments = emptyList()
+                        },
+                    )
+                }
             }
         },
     ) { padding ->
@@ -472,7 +505,10 @@ fun ChatScreen(
                     )
                 }
             }
-            itemsIndexed(transcriptMessages) { index, message ->
+            itemsIndexed(
+                items = transcriptMessages,
+                key = { index, message -> transcriptMessageKey(sessionId, message, index) },
+            ) { index, message ->
                 val isLast = index == transcriptMessages.lastIndex
                 MessageItem(
                     message = message,
@@ -593,10 +629,23 @@ internal fun withOptimisticOutgoing(
     pending.forEach { outgoing ->
         val serverOccurrences = messages.count { it.role == "user" && it.content == outgoing.text }
         if (serverOccurrences < outgoing.occurrence) {
-            add(MessageDto(id = "optimistic:${outgoing.occurrence}:${outgoing.text}", role = "user", content = outgoing.text))
+            add(
+                MessageDto(
+                    id = "optimistic:${outgoing.occurrence}:${outgoing.text}",
+                    role = "user",
+                    content = outgoing.text,
+                    contentFormat = MessageContentFormat.Plain,
+                ),
+            )
         }
     }
 }
+
+internal fun activityResultBelongsToSession(originSessionId: String?, selectedSessionId: String): Boolean =
+    originSessionId != null && originSessionId == selectedSessionId
+
+internal fun transcriptMessageKey(sessionId: String, message: MessageDto, index: Int): String =
+    "$sessionId:${message.id ?: "$index:${message.role}:${message.content.hashCode()}"}"
 
 internal data class TranscriptPresentation(
     val messages: List<MessageDto>,
@@ -730,6 +779,7 @@ private fun ChatComposer(
                         .fillMaxWidth()
                         .heightIn(min = 44.dp, max = 168.dp)
                         .padding(horizontal = 10.dp, vertical = 10.dp)
+                        .testTag("message-composer")
                         .onPreviewKeyEvent { event ->
                             val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
                             if (shouldSendHardwareEnter(
@@ -994,11 +1044,13 @@ private fun MessageItem(
             },
             content = message.content.orEmpty(),
             colors = colors,
+            markdown = message.contentFormat == MessageContentFormat.Markdown,
         )
         else -> LabeledMessage(
             label = agentName,
             content = message.content.orEmpty(),
             colors = colors,
+            markdown = message.contentFormat == MessageContentFormat.Markdown,
             hoistQuestions = hoistQuestions,
             onRecommendationAction = onRecommendationAction,
         )
@@ -1040,6 +1092,7 @@ private fun LabeledMessage(
     label: String,
     content: String,
     colors: ComposerColors,
+    markdown: Boolean = false,
     streaming: Boolean = false,
     hoistQuestions: Boolean = false,
     onRecommendationAction: ((String) -> Unit)? = null,
@@ -1057,6 +1110,7 @@ private fun LabeledMessage(
         MessageBody(
             content = content,
             colors = colors,
+            markdown = markdown,
             streaming = streaming,
             hoistQuestions = hoistQuestions,
             onRecommendationAction = onRecommendationAction,
@@ -1184,6 +1238,7 @@ private fun questionAt(blocks: List<MessageBlock>): Int {
 private fun MessageBody(
     content: String,
     colors: ComposerColors,
+    markdown: Boolean = false,
     streaming: Boolean = false,
     hoistQuestions: Boolean = false,
     onRecommendationAction: ((String) -> Unit)? = null,
@@ -1194,14 +1249,25 @@ private fun MessageBody(
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             blocks.forEachIndexed { index, block ->
                 if (!block.code) {
-                    Text(
-                        text = block.text,
-                        color = colors.ink,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = 15.sp,
-                            lineHeight = 23.sp,
-                        ),
-                    )
+                    if (markdown) {
+                        MarkdownContent(
+                            content = block.text,
+                            ink = colors.ink,
+                            muted = colors.muted,
+                            surface = colors.surface,
+                            line = colors.line,
+                            link = colors.action,
+                        )
+                    } else {
+                        Text(
+                            text = block.text,
+                            color = colors.ink,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 15.sp,
+                                lineHeight = 23.sp,
+                            ),
+                        )
+                    }
                 } else if (block.isRecommendationFence()) {
                     // A pinned question is deliberately not duplicated in its
                     // transcript position. While streaming, retain an
@@ -1454,7 +1520,13 @@ private fun LiveActivity(
             ToolCallGroup(state.runId, state.tools, toolDisclosure, colors)
         }
         if (state.streaming.isNotBlank()) {
-            LabeledMessage(agentName, state.streaming, colors, streaming = true)
+            LabeledMessage(
+                label = agentName,
+                content = state.streaming,
+                colors = colors,
+                markdown = true,
+                streaming = true,
+            )
         }
         state.failure?.let { RunFailure(it) }
         if (state.running && state.streaming.isBlank() && state.approval == null && state.failure == null) {

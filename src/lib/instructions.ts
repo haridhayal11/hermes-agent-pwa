@@ -91,6 +91,10 @@ export function composeInstructions(
     );
   }
 
+  parts.push(
+    "This chat renders Markdown in your replies. Supported formatting is bold, italic, inline code, fenced code blocks, links, and bullet or numbered lists. Use only those forms when they improve readability; plain text is also rendered normally. Do not use headings, tables, blockquotes, raw HTML, or Markdown images.",
+  );
+
   /* Recommendation and question cards. Nothing in Hermes' event vocabulary
    * carries a suggestion, a confidence, or a clarifying question —
    * approval.request is the only human-in-the-loop event, and it is a security

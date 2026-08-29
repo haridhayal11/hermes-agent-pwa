@@ -67,22 +67,35 @@ export function extractQuestion(content: string): Recommendation | null {
   return segment.kind === "code" ? parseRecommendation(segment.value) : null;
 }
 
-/* Inline markdown, for text that was written for a markdown reader.
+/* Inline Markdown for generated text declared as `content_format: markdown`.
  *
  * There is still no markdown *document* renderer here, and the reason has not
  * changed: agent output must not be able to inject markup. This is narrower —
- * it tokenises four inline spans and builds React elements, so the text stays
+ * it tokenises the supported inline spans and builds React elements, so the text stays
  * text and there is no HTML anywhere in the path.
  *
- * Cron output is what forced it. Those prompts ask for Telegram formatting, so
- * the reports arrive full of `**bold**` and backticks, and rendering them
- * literally put the asterisks on screen.
+ * Generated assistant output and cron reports share the same server-declared
+ * contract. Plain messages never enter this path.
  */
-const INLINE_MD = /(\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\*[^*\n]+\*|_[^_\n]+_)/g;
+const INLINE_MD = /(\[[^\]\n]+\]\(https?:\/\/[^\s)\n]+\)|\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\*[^*\n]+\*|_[^_\n]+_)/gi;
 
 export function renderInline(text: string): React.ReactNode[] {
   return text.split(INLINE_MD).map((token, i) => {
     if (i % 2 === 0) return token;
+    const link = /^\[([^\]\n]+)\]\((https?:\/\/[^\s)\n]+)\)$/i.exec(token);
+    if (link) {
+      return (
+        <a
+          key={i}
+          href={link[2]}
+          target="_blank"
+          rel="noreferrer"
+          className="text-accent underline underline-offset-2"
+        >
+          {link[1]}
+        </a>
+      );
+    }
     if (token.startsWith("**") || token.startsWith("__")) {
       return (
         <strong key={i} className="font-semibold">
@@ -250,6 +263,7 @@ export function UserMessage({
 
 export function AssistantMessage({
   content,
+  markdown = false,
   streaming = false,
   resolving = false,
   footer,
@@ -257,6 +271,8 @@ export function AssistantMessage({
   onRecommendationAction,
 }: {
   content: string;
+  /** Interpret safe Markdown spans declared by the message contract. */
+  markdown?: boolean;
   /** show the caret — text is still arriving */
   streaming?: boolean;
   /** dimmed/blurred: written, but the run hasn't settled */
@@ -287,6 +303,7 @@ export function AssistantMessage({
       <div className="flex flex-col gap-2.5">
         <MessageBody
           content={content}
+          markdown={markdown}
           streaming={streaming}
           hoistQuestions={hoistQuestions}
           onRecommendationAction={onRecommendationAction}
@@ -314,17 +331,17 @@ export function AssistantMessage({
  * agent said, in this project, unprompted. The only difference is the header, which
  * has to say so, since nobody typed the message that produced it.
  *
- * The body goes through MessageBody with inline markdown resolved. Cron
- * prompts ask for Telegram formatting, so these reports arrive full of
- * `**bold**`, and printing the asterisks was the whole complaint. No
+ * The body goes through MessageBody with its declared Markdown resolved. No
  * recommendation handling: an unattended job has nobody to ask.
  */
 export function CronMessage({
   content,
   meta,
+  markdown,
 }: {
   content: string;
   meta: CronMeta;
+  markdown: boolean;
 }) {
   return (
     <div
@@ -336,7 +353,7 @@ export function CronMessage({
         {meta.status === "failed" ? " · failed" : ""}
       </div>
       <div className="flex flex-col gap-2.5">
-        <MessageBody content={content} markdown />
+        <MessageBody content={content} markdown={markdown} />
         {/* Same path probe as any other turn. A job that wrote outside the
           * outbox, the upload cache or a project cwd renders as plain text —
           * the allowlist is the security model, and a scheduled prompt naming

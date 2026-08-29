@@ -5,6 +5,11 @@
  * assistant reply the thread could be asked to continue.
  */
 export type MessageRole = "user" | "assistant" | "system" | "cron";
+export type MessageContentFormat = "plain" | "markdown";
+
+export function isMessageContentFormat(value: unknown): value is MessageContentFormat {
+  return value === "plain" || value === "markdown";
+}
 
 /**
  * What the user hung off a message. Images ride inline as data: URLs because
@@ -36,6 +41,8 @@ export interface ThreadMessage {
   id: string;
   role: MessageRole;
   content: string;
+  /** Explicit at the app boundary; generated output is Markdown, user input is plain. */
+  contentFormat: MessageContentFormat;
   /** present exactly when role is "cron" */
   cron?: CronMeta;
   /**

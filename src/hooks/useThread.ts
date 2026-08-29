@@ -11,6 +11,7 @@ import type {
   ThreadMessage,
   ToolCall,
 } from "@/lib/chat-types";
+import { isMessageContentFormat } from "@/lib/chat-types";
 
 /* Everything the thread UI needs, derived from our replayable SSE stream.
  * The components downstream are presentational — no scripted timers, no
@@ -144,6 +145,7 @@ export function useThread(
         id?: string;
         role: string;
         content?: unknown;
+        content_format?: unknown;
         cron?: ThreadMessage["cron"];
       }[];
     };
@@ -153,6 +155,7 @@ export function useThread(
           (m) =>
             typeof m.content === "string" &&
             m.content.length > 0 &&
+            isMessageContentFormat(m.content_format) &&
             (m.role === "user" ||
               m.role === "assistant" ||
               m.role === "system" ||
@@ -162,6 +165,7 @@ export function useThread(
           id: m.id ?? `msg_${i}`,
           role: m.role as ThreadMessage["role"],
           content: m.content as string,
+          contentFormat: m.content_format as ThreadMessage["contentFormat"],
           // Only cron messages carry it; the route omits the key otherwise.
           ...(m.cron ? { cron: m.cron } : {}),
         })),
@@ -344,6 +348,7 @@ export function useThread(
                 id: delivery.id as string,
                 role: "cron",
                 content: delivery.body as string,
+                contentFormat: "markdown",
                 cron: {
                   jobId: delivery.job_id ?? "",
                   jobName: delivery.job_name ?? "Scheduled job",
@@ -399,7 +404,12 @@ export function useThread(
             if (last?.role === "user" && last.content === text) return prev;
             return [
               ...prev,
-              { id: `steer_${evt.run_id}:${evt.seq}`, role: "user", content: text },
+              {
+                id: `steer_${evt.run_id}:${evt.seq}`,
+                role: "user",
+                content: text,
+                contentFormat: "plain",
+              },
             ];
           });
           break;
@@ -475,7 +485,12 @@ export function useThread(
           if (finalText.trim()) {
             setMessages((prev) => [
               ...prev,
-              { id: `local_${Date.now()}`, role: "assistant", content: finalText },
+              {
+                id: `local_${Date.now()}`,
+                role: "assistant",
+                content: finalText,
+                contentFormat: "markdown",
+              },
             ]);
           }
           // run.failed carries the upstream reason in `error` — a provider
@@ -523,6 +538,7 @@ export function useThread(
           id: `local_${Date.now()}`,
           role: "user",
           content: trimmed,
+          contentFormat: "plain",
           // Local to this turn: refreshMessages re-reads history from Hermes,
           // which returns text only, so the thumbnails go once the run settles
           // and the file paths in the prompt are what remains.

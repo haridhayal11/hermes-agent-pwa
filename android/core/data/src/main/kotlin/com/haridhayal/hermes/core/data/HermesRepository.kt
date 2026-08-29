@@ -105,16 +105,19 @@ class HermesRepository @Inject constructor(
 
     suspend fun refreshAll() {
         val config = requireConnection()
-        val projects = withContext(Dispatchers.IO) { api.projects(config).projects }
-        dao.upsertProjects(projects.map(::projectEntity))
-        if (projects.isEmpty()) {
-            dao.clearAllMessages()
-            dao.clearRunCursors()
-            dao.clearProjects()
-            return
+        val (projects, sessionsByProject) = withContext(Dispatchers.IO) {
+            val refreshedProjects = api.projects(config).projects
+            val refreshedSessions = refreshedProjects.associate { project ->
+                project.id to api.sessions(config, project.id).sessions
+            }
+            refreshedProjects to refreshedSessions
         }
-        dao.removeMissingProjectData(projects.map { it.id })
-        projects.forEach { project -> refreshSessions(config, project.id) }
+        dao.replaceProjectTree(
+            projects = projects.map(::projectEntity),
+            sessionsByProject = sessionsByProject.mapValues { (_, sessions) ->
+                sessions.map(::sessionEntity)
+            },
+        )
     }
 
     suspend fun refreshSession(projectId: String, sessionId: String) {
@@ -407,11 +410,6 @@ class HermesRepository @Inject constructor(
             File(entry.localPath).delete()
             dao.deleteMedia(entry.cacheKey)
         }
-    }
-
-    private suspend fun refreshSessions(config: ConnectionConfig, projectId: String) {
-        val sessions = withContext(Dispatchers.IO) { api.sessions(config, projectId).sessions }
-        dao.replaceSessions(projectId, sessions.map(::sessionEntity))
     }
 
     private suspend fun requireConnection(): ConnectionConfig =

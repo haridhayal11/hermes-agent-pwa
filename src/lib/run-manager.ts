@@ -14,6 +14,7 @@ import { outboxDirFor } from "./uploads";
 import { RECOMMEND_FENCE, type Attachment } from "./chat-types";
 import { sendToAll, type PushKind } from "./push";
 import { autoNameSession, getProjectSession } from "./project-sessions";
+import { markdownToPlainText } from "./markdown";
 
 // api_server.py's /v1/runs event vocabulary (gateway/platforms/api_server.py,
 // _handle_runs / _run_and_close). "run.cancelled" only fires via /stop.
@@ -537,11 +538,7 @@ class RunManager extends EventEmitter {
    * `${RECOMMEND_FENCE}` card would otherwise notify with a brace.
    */
   private replyPreview(runId: string): string {
-    const text = this.runText(runId)
-      .replace(/```[\s\S]*?(?:```|$)/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    return text.slice(0, 140);
+    return markdownToPlainText(this.runText(runId)).slice(0, 140);
   }
 
   /**

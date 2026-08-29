@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -21,10 +22,10 @@ interface HermesDao {
     @Query("SELECT * FROM messages WHERE sessionId = :sessionId ORDER BY ordinal")
     fun observeMessages(sessionId: String): Flow<List<MessageEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertProjects(projects: List<ProjectEntity>)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertSessions(sessions: List<SessionEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -175,6 +176,24 @@ interface HermesDao {
 
     @Query("DELETE FROM run_cursors")
     suspend fun clearRunCursors()
+
+    @Transaction
+    suspend fun replaceProjectTree(
+        projects: List<ProjectEntity>,
+        sessionsByProject: Map<String, List<SessionEntity>>,
+    ) {
+        if (projects.isEmpty()) {
+            clearAllMessages()
+            clearRunCursors()
+            clearProjects()
+            return
+        }
+        upsertProjects(projects)
+        removeMissingProjectData(projects.map { it.id })
+        projects.forEach { project ->
+            replaceSessions(project.id, sessionsByProject[project.id].orEmpty())
+        }
+    }
 
     @Query("DELETE FROM sync_state")
     suspend fun clearSyncState()

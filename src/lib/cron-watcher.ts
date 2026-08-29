@@ -9,6 +9,7 @@ import { runManager } from "./run-manager";
 import { sendToAll } from "./push";
 import { ensureScheduledSession } from "./project-sessions";
 import { publishChange } from "./api-changes";
+import { markdownToPlainText } from "./markdown";
 
 /* Scheduled jobs, delivered into a project.
  *
@@ -151,26 +152,6 @@ export function isSilent(text: string): boolean {
   if (tokens.has(trimmed.toUpperCase())) return true;
   const lines = trimmed.split("\n").map((l) => l.trim().toUpperCase());
   return tokens.has(lines[0]) || tokens.has(lines[lines.length - 1]);
-}
-
-/**
- * Markdown markers off, for a notification.
- *
- * A push body is plain text on every platform — there is nowhere for `**` to
- * render — and these reports are written for Telegram, so they are full of it.
- * Fences go entirely; inline markers are unwrapped rather than deleted, so
- * `**376 kcal over**` reads as "376 kcal over" and not as "376 kcal over"
- * with the asterisks still attached.
- */
-export function plainText(markdown: string): string {
-  return markdown
-    .replace(/```[\s\S]*?(?:```|$)/g, " ")
-    .replace(/(\*\*|__)([^*_\n]+)\1/g, "$2")
-    .replace(/(\*|_|`)([^*_`\n]+)\1/g, "$2")
-    .replace(/^\s*[-*+]\s+/gm, "")
-    .replace(/^\s*#{1,6}\s+/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 /**
@@ -356,7 +337,7 @@ async function deliver(job: HermesJob, binding: CronBinding, file: string) {
     body:
       status === "failed"
         ? `${job.name} failed.`
-        : `${job.name}: ${plainText(body).slice(0, 140)}`,
+        : `${job.name}: ${markdownToPlainText(body).slice(0, 140)}`,
     url: `/p/${binding.project_id}/s/${scheduled.session_id}`,
     // Its own tag: a scheduled result arriving overnight must not silently
     // replace the notification for the run you were watching before bed.

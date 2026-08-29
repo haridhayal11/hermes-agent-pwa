@@ -2,10 +2,13 @@ package com.haridhayal.hermes
 
 import com.haridhayal.hermes.core.data.ProjectTree
 import com.haridhayal.hermes.core.model.MessageDto
+import com.haridhayal.hermes.core.model.MessageContentFormat
 import com.haridhayal.hermes.core.model.ProjectDto
 import com.haridhayal.hermes.core.model.SessionDto
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SelectionResolverTest {
@@ -29,6 +32,47 @@ class SelectionResolverTest {
     @Test
     fun explicitSessionSwitchIsPreservedWithinItsProject() {
         assertEquals(ResolvedSelection("p2", "s2"), resolveSelection(tree, "p2", "s2"))
+    }
+
+    @Test
+    fun explicitScheduledSessionIsPreservedAfterItsUnreadCountIsCleared() {
+        val project = ProjectDto(
+            id = "p1",
+            name = "p1",
+            activeSessionId = "chat",
+            scheduledSessionId = "p1__scheduled",
+            unreadScheduledCount = 0,
+            createdAt = 1,
+            lastActiveAt = 20,
+        )
+        val sessions = listOf(
+            session("chat", "p1", 20),
+            session("p1__scheduled", "p1", 10, kind = "scheduled"),
+        )
+
+        assertEquals(
+            ResolvedSelection("p1", "p1__scheduled"),
+            resolveSelection(ProjectTree(listOf(project), sessions), "p1", "p1__scheduled"),
+        )
+    }
+
+    @Test
+    fun aLaterManualSelectionSupersedesAPendingProjectOpen() {
+        val pendingProjectOpen = 1L
+        val manualSelection = 2L
+
+        assertFalse(navigationResultIsCurrent(pendingProjectOpen, manualSelection))
+        assertTrue(navigationResultIsCurrent(manualSelection, manualSelection))
+    }
+
+    @Test
+    fun scheduledNotificationTargetMustBelongToTheRequestedProject() {
+        val scheduled = session("p1__scheduled", "p1", 10, kind = "scheduled")
+        val scheduledTree = ProjectTree(listOf(first, second), tree.sessions + scheduled)
+
+        assertTrue(selectionExists(scheduledTree, "p1", "p1__scheduled"))
+        assertFalse(selectionExists(scheduledTree, "p2", "p1__scheduled"))
+        assertFalse(selectionExists(tree, "p1", "p1__scheduled"))
     }
 
     @Test
@@ -66,7 +110,13 @@ class SelectionResolverTest {
 
     @Test
     fun messagesFromThePreviousSessionAreHiddenDuringASelectionChange() {
-        val oldMessages = listOf(MessageDto(role = "assistant", content = "Old reply"))
+        val oldMessages = listOf(
+            MessageDto(
+                role = "assistant",
+                content = "Old reply",
+                contentFormat = MessageContentFormat.Markdown,
+            ),
+        )
         val snapshot = SessionMessagesSnapshot("old-session", oldMessages)
 
         assertEquals(oldMessages, messagesForSession(snapshot, "old-session"))
@@ -81,11 +131,17 @@ class SelectionResolverTest {
         lastActiveAt = lastActiveAt,
     )
 
-    private fun session(id: String, projectId: String, lastActiveAt: Long) = SessionDto(
+    private fun session(
+        id: String,
+        projectId: String,
+        lastActiveAt: Long,
+        kind: String = "chat",
+    ) = SessionDto(
         id = id,
         projectId = projectId,
         title = id,
         createdAt = 1,
         lastActiveAt = lastActiveAt,
+        kind = kind,
     )
 }

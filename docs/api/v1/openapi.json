@@ -788,11 +788,12 @@
       },
       "Message": {
         "type": "object",
-        "required": ["role"],
+        "required": ["role", "content_format"],
         "properties": {
           "id": { "type": "string" },
           "role": { "enum": ["user", "assistant", "system", "cron", "tool"] },
           "content": { "type": ["string", "null"] },
+          "content_format": { "enum": ["plain", "markdown"], "description": "How clients should render content. Generated assistant and cron output is Markdown; user, system, and tool content is plain text." },
           "timestamp": { "type": ["string", "number", "null"] },
           "cron": { "type": "object", "additionalProperties": true }
         },

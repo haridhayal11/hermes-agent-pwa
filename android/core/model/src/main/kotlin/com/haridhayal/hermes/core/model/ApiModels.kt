@@ -169,11 +169,22 @@ data class ScheduledReadResponse(
 )
 
 @Serializable
+enum class MessageContentFormat {
+    @SerialName("plain")
+    Plain,
+
+    @SerialName("markdown")
+    Markdown,
+}
+
+@Serializable
 data class MessageDto(
     @Serializable(with = NullableStringOrNumberSerializer::class)
     val id: String? = null,
     val role: String,
     val content: String? = null,
+    @SerialName("content_format")
+    val contentFormat: MessageContentFormat,
     val timestamp: JsonElement? = null,
     val cron: JsonObject? = null,
 )

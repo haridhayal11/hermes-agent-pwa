@@ -95,4 +95,32 @@ class RunEventPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun lateSendResultsOnlyApplyToTheirStillSelectedConversation() {
+        assertTrue(
+            selectionMatches(
+                targetProjectId = "project-a",
+                targetSessionId = "session-a",
+                selectedProjectId = "project-a",
+                selectedSessionId = "session-a",
+            ),
+        )
+        assertFalse(
+            selectionMatches(
+                targetProjectId = "project-a",
+                targetSessionId = "session-a",
+                selectedProjectId = "project-a",
+                selectedSessionId = "session-b",
+            ),
+        )
+        assertFalse(
+            selectionMatches(
+                targetProjectId = "project-a",
+                targetSessionId = "session-a",
+                selectedProjectId = "project-b",
+                selectedSessionId = "session-a",
+            ),
+        )
+    }
 }

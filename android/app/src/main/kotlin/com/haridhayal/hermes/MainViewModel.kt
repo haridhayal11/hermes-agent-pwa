@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
@@ -102,9 +103,29 @@ internal fun streamCompletionSettlesSelection(
     streamSessionId: String,
     selectedProjectId: String?,
     selectedSessionId: String?,
-): Boolean = cause == null &&
-    streamProjectId == selectedProjectId &&
-    streamSessionId == selectedSessionId
+): Boolean = cause == null && selectionMatches(
+    targetProjectId = streamProjectId,
+    targetSessionId = streamSessionId,
+    selectedProjectId = selectedProjectId,
+    selectedSessionId = selectedSessionId,
+)
+
+internal fun selectionMatches(
+    targetProjectId: String,
+    targetSessionId: String,
+    selectedProjectId: String?,
+    selectedSessionId: String?,
+): Boolean = targetProjectId == selectedProjectId && targetSessionId == selectedSessionId
+
+internal fun navigationResultIsCurrent(requestRevision: Long, currentRevision: Long): Boolean =
+    requestRevision == currentRevision
+
+internal fun selectionExists(
+    tree: ProjectTree,
+    projectId: String,
+    sessionId: String,
+): Boolean = tree.projects.any { it.id == projectId } &&
+    tree.sessions.any { it.projectId == projectId && it.id == sessionId }
 
 internal fun resolveSelection(
     tree: ProjectTree,
@@ -151,6 +172,7 @@ class MainViewModel @Inject constructor(
     private val events = MutableStateFlow<List<StreamEventDto>>(emptyList())
     private val run = MutableStateFlow<Pair<String?, Boolean>>(null to false)
     private val streamRevision = MutableStateFlow(0L)
+    private var navigationRevision = 0L
     private var searchJob: Job? = null
     private var nextErrorId = 0L
 
@@ -325,21 +347,52 @@ class MainViewModel @Inject constructor(
         selectedSessionId.value = sessionId
     }
 
+    private fun beginNavigation(): Long {
+        navigationRevision += 1
+        return navigationRevision
+    }
+
+    private fun applyNavigation(requestRevision: Long, projectId: String?, sessionId: String?) {
+        if (navigationResultIsCurrent(requestRevision, navigationRevision)) {
+            updateSelection(projectId, sessionId)
+        }
+    }
+
     fun pair(host: String, code: String, deviceName: String) = launchAction(pairing = true) {
         repository.pair(host, code, deviceName, BuildConfig.DEBUG)
     }
 
     fun select(project: ProjectDto, session: SessionDto) {
+        beginNavigation()
         updateSelection(project.id, session.id)
     }
 
     fun open(projectId: String, sessionId: String) {
-        updateSelection(projectId, sessionId)
+        val requestRevision = beginNavigation()
+        if (selectionExists(uiState.value.tree, projectId, sessionId)) {
+            updateSelection(projectId, sessionId)
+            return
+        }
+        launchAction {
+            // A notification can arrive before its newly-created scheduled
+            // session has reached Room. Refresh before resolving the exact
+            // destination so the normal-chat fallback cannot erase it.
+            repository.refreshAll()
+            if (!navigationResultIsCurrent(requestRevision, navigationRevision)) return@launchAction
+            val refreshedTree = repository.projectTree.first()
+            check(selectionExists(refreshedTree, projectId, sessionId)) {
+                "That conversation is no longer available"
+            }
+            applyNavigation(requestRevision, projectId, sessionId)
+        }
     }
 
-    fun openProject(project: ProjectDto) = launchAction {
-        val session = repository.openProject(project.id)
-        updateSelection(project.id, session.id)
+    fun openProject(project: ProjectDto) {
+        val requestRevision = beginNavigation()
+        launchAction {
+            val session = repository.openProject(project.id)
+            applyNavigation(requestRevision, project.id, session.id)
+        }
     }
 
     fun markScheduledRead() = launchAction {
@@ -349,23 +402,33 @@ class MainViewModel @Inject constructor(
         repository.markScheduledRead(project.id)
     }
 
-    fun createProject(name: String) = launchAction {
-        val project = repository.createProject(CreateProjectRequest(name = name))
-        updateSelection(project.id, project.selectedSessionId)
+    fun createProject(name: String) {
+        val requestRevision = beginNavigation()
+        launchAction {
+            val project = repository.createProject(CreateProjectRequest(name = name))
+            applyNavigation(requestRevision, project.id, project.selectedSessionId)
+        }
     }
 
-    fun createSession(projectId: String? = null) = launchAction {
+    fun createSession(projectId: String? = null) {
         val project = projectId?.let { id -> uiState.value.tree.projects.firstOrNull { it.id == id } }
-            ?: uiState.value.selectedProject ?: return@launchAction
-        val session = repository.createSession(project.id)
-        updateSelection(project.id, session.id)
+            ?: uiState.value.selectedProject ?: return
+        val requestRevision = beginNavigation()
+        launchAction {
+            val session = repository.createSession(project.id)
+            applyNavigation(requestRevision, project.id, session.id)
+        }
     }
 
-    fun forkSession() = launchAction {
-        val project = uiState.value.selectedProject ?: return@launchAction
-        val session = uiState.value.selectedSession ?: return@launchAction
-        if (session.kind == "scheduled") return@launchAction
-        updateSelection(project.id, repository.forkSession(project.id, session.id).id)
+    fun forkSession() {
+        val project = uiState.value.selectedProject ?: return
+        val session = uiState.value.selectedSession ?: return
+        if (session.kind == "scheduled") return
+        val requestRevision = beginNavigation()
+        launchAction {
+            val fork = repository.forkSession(project.id, session.id)
+            applyNavigation(requestRevision, project.id, fork.id)
+        }
     }
 
     fun renameSession(title: String) = launchAction {
@@ -471,9 +534,11 @@ class MainViewModel @Inject constructor(
                     text,
                     attachments,
                 )
-                updateSelection(project.id, result.session.id)
-                run.value = result.runId.takeIf(String::isNotBlank) to (result.startupError == null)
-                streamRevision.value += 1
+                if (selectionMatches(project.id, session.id, selectedProjectId.value, selectedSessionId.value)) {
+                    updateSelection(project.id, result.session.id)
+                    run.value = result.runId.takeIf(String::isNotBlank) to (result.startupError == null)
+                    streamRevision.value += 1
+                }
                 result.startupError?.let { setError(IllegalStateException(it)) }
                 return@launchAction
             }
@@ -482,11 +547,13 @@ class MainViewModel @Inject constructor(
             } else {
                 runCatching { repository.sendNow(project.id, session.id, text) }
                     .onSuccess { result ->
-                        run.value = result.runId to true
-                        // A session event stream opened before a run exists stays attached to
-                        // the idle session. Reconnect after the POST creates/adopts a run so
-                        // its replay and live events are delivered immediately.
-                        streamRevision.value += 1
+                        if (selectionMatches(project.id, session.id, selectedProjectId.value, selectedSessionId.value)) {
+                            run.value = result.runId to true
+                            // A session event stream opened before a run exists stays attached to
+                            // the idle session. Reconnect after the POST creates/adopts a run so
+                            // its replay and live events are delivered immediately.
+                            streamRevision.value += 1
+                        }
                     }
                     .onFailure { repository.enqueuePrompt(project.id, session.id, text, emptyList()) }
             }

@@ -2,6 +2,7 @@ package com.haridhayal.hermes.feature.chat
 
 import com.haridhayal.hermes.core.data.DisclosurePreference
 import com.haridhayal.hermes.core.model.MessageDto
+import com.haridhayal.hermes.core.model.MessageContentFormat
 import com.haridhayal.hermes.core.model.StreamEventDto
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -13,11 +14,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatPresentationTest {
-    private val user = MessageDto(role = "user", content = "Question")
+    private val user = MessageDto(
+        role = "user",
+        content = "Question",
+        contentFormat = MessageContentFormat.Plain,
+    )
 
     @Test
     fun exactPersistedAndLiveRepliesRenderAsOnePersistedReply() {
-        val assistant = MessageDto(role = "assistant", content = "Complete reply")
+        val assistant = assistant("Complete reply")
 
         val result = reconcileTranscript(listOf(user, assistant), "Complete reply", running = true)
 
@@ -28,7 +33,7 @@ class ChatPresentationTest {
 
     @Test
     fun moreCompletePersistedReplyReplacesItsLivePrefix() {
-        val assistant = MessageDto(role = "assistant", content = "Complete reply from history")
+        val assistant = assistant("Complete reply from history")
 
         val result = reconcileTranscript(listOf(user, assistant), "Complete reply", running = true)
 
@@ -39,7 +44,7 @@ class ChatPresentationTest {
 
     @Test
     fun moreCompleteLiveReplyReplacesItsPersistedPrefix() {
-        val assistant = MessageDto(role = "assistant", content = "Complete reply")
+        val assistant = assistant("Complete reply")
 
         val result = reconcileTranscript(
             listOf(user, assistant),
@@ -54,13 +59,19 @@ class ChatPresentationTest {
 
     @Test
     fun completedRunsLeavePersistedHistoryUntouched() {
-        val assistant = MessageDto(role = "assistant", content = "Complete reply")
+        val assistant = assistant("Complete reply")
 
         val result = reconcileTranscript(listOf(user, assistant), "Complete reply", running = false)
 
         assertEquals(listOf(user, assistant), result.messages)
         assertEquals("Complete reply", result.streaming)
     }
+
+    private fun assistant(content: String) = MessageDto(
+        role = "assistant",
+        content = content,
+        contentFormat = MessageContentFormat.Markdown,
+    )
 
     @Test
     fun hiddenCollapsedAndExpandedToolPresentationBehaveAsConfigured() {

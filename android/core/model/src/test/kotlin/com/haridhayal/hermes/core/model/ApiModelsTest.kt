@@ -1,11 +1,13 @@
 package com.haridhayal.hermes.core.model
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ApiModelsTest {
@@ -41,9 +43,20 @@ class ApiModelsTest {
     @Test
     fun messagePageAcceptsStringNumericAndMissingIds() {
         val page = json.decodeFromString<MessagePage>(
-            """{"messages":[{"id":"m-1","role":"user"},{"id":42,"role":"assistant"},{"role":"tool"}],"nextCursor":null,"hasMore":false}""",
+            """{"messages":[{"id":"m-1","role":"user","content_format":"plain"},{"id":42,"role":"assistant","content_format":"markdown"},{"role":"tool","content_format":"plain"}],"nextCursor":null,"hasMore":false}""",
         )
         assertEquals(listOf("m-1", "42", null), page.messages.map { it.id })
+        assertEquals(
+            listOf(MessageContentFormat.Plain, MessageContentFormat.Markdown, MessageContentFormat.Plain),
+            page.messages.map { it.contentFormat },
+        )
+    }
+
+    @Test
+    fun messageContentFormatIsRequiredByTheNativeContract() {
+        assertThrows(SerializationException::class.java) {
+            json.decodeFromString<MessageDto>("""{"role":"assistant","content":"Reply"}""")
+        }
     }
 
     @Test

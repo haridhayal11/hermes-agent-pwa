@@ -385,11 +385,17 @@ export function ChatThread({
       ) : message.role === "system" ? (
         <SystemMessage key={message.id} content={message.content} />
       ) : message.role === "cron" && message.cron ? (
-        <CronMessage key={message.id} content={message.content} meta={message.cron} />
+        <CronMessage
+          key={message.id}
+          content={message.content}
+          meta={message.cron}
+          markdown={message.contentFormat === "markdown"}
+        />
       ) : (
         <AssistantMessage
           key={message.id}
           content={message.content}
+          markdown={message.contentFormat === "markdown"}
           // A recommendation is a question about what to do next, so only the
           // newest one is still answerable; older cards render inert.
           onRecommendationAction={
@@ -455,6 +461,7 @@ export function ChatThread({
                 <AssistantMessage
                   content={streaming}
                   streaming
+                  markdown
                   // written, but not yet acted on — the run is blocked on a
                   // decision, so the text reads as provisional
                   resolving={phase === "waiting_for_approval"}

@@ -242,6 +242,9 @@ private fun HermesApp(
     var settingsName by remember(state.selectedProject?.id) { mutableStateOf(state.selectedProject?.name.orEmpty()) }
     var settingsInstructions by remember(state.selectedProject?.id) { mutableStateOf(state.selectedProject?.instructions.orEmpty()) }
     var settingsPinned by remember(state.selectedProject?.id) { mutableStateOf(state.selectedProject?.pinned ?: false) }
+    LaunchedEffect(state.selectedProject?.id) {
+        projectSettings = false
+    }
     LaunchedEffect(state.error?.id) {
         val error = state.error ?: return@LaunchedEffect
         val result = snackbarHostState.showSnackbar(
@@ -288,6 +291,7 @@ private fun HermesApp(
                 entry<ChatRoute> {
                     ChatScreen(
                         projectName = state.selectedProject?.name ?: "Hermes",
+                        sessionId = state.selectedSession?.id.orEmpty(),
                         sessionTitle = state.selectedSession?.title ?: "Chat",
                         agentName = sharedAgentName,
                         preferences = preferences,

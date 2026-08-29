@@ -8,6 +8,7 @@ import type {
   ProjectSession,
   ThreadMessage,
 } from "@/lib/chat-types";
+import { isMessageContentFormat } from "@/lib/chat-types";
 import { withProjectNavigation } from "@/lib/project-sessions";
 
 export const dynamic = "force-dynamic";
@@ -52,18 +53,21 @@ export default async function SessionPage({
       id?: string;
       role?: string;
       content?: unknown;
+      content_format?: unknown;
       cron?: ThreadMessage["cron"];
     }[])
       .filter(
         (message) =>
           typeof message.content === "string" &&
           message.content.length > 0 &&
+          isMessageContentFormat(message.content_format) &&
           ["user", "assistant", "system", "cron"].includes(message.role ?? ""),
       )
       .map((message, index) => ({
         id: message.id ?? `msg_${index}`,
         role: message.role as ThreadMessage["role"],
         content: message.content as string,
+        contentFormat: message.content_format as ThreadMessage["contentFormat"],
         ...(message.cron ? { cron: message.cron } : {}),
       }));
   } catch {

@@ -164,13 +164,13 @@ The same scrape runs over user turns, which is what makes uploads durable:
 included, so the thread rediscovers its own attachments after a reload — where
 history comes back from Hermes as text and nothing else.
 
-**There is no markdown renderer, but there is an inline one.** Agent output
-must not be able to inject markup, so `MessageBody` still prints text as text.
-`renderInline()` is the narrow exception: it tokenises bold, italic and code
-spans into React elements — no HTML anywhere in the path — and is opt-in via
-`markdown`. Cron output is why it exists, since those prompts ask for Telegram
-formatting and the reports arrive full of `**`. Assistant turns deliberately
-do not use it.
+**Generated message formatting is an explicit contract.** `/api/v1` adds the
+required `content_format` field after normalising Hermes history: assistant and
+cron output is `markdown`, while user, system and tool text is `plain`. The web
+thread and Android render only messages declared as Markdown; user-authored
+text remains literal. Neither client renders agent-supplied HTML. Notification
+previews use the shared plain-text projection because push surfaces cannot
+render Markdown.
 
 **Skills are linked by name, never inlined.** Hermes can preload a skill's full
 text, but installed skills reach ~100KB — pasting one into every turn would

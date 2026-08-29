@@ -4,12 +4,24 @@ import { mergeProjectMessages, normalizeMessage } from "./message-normalization"
 
 describe("message normalization", () => {
   it("preserves string ids and canonicalises numeric ids", () => {
-    expect(normalizeMessage({ id: "m-1", role: "user" }).id).toBe("m-1");
-    expect(normalizeMessage({ id: 42, role: "assistant" }).id).toBe("42");
+    expect(normalizeMessage({ id: "m-1", role: "user" })).toMatchObject({
+      id: "m-1",
+      content_format: "plain",
+    });
+    expect(normalizeMessage({ id: 42, role: "assistant" })).toMatchObject({
+      id: "42",
+      content_format: "markdown",
+    });
   });
 
   it("keeps an absent id absent", () => {
     expect(normalizeMessage({ role: "assistant" })).not.toHaveProperty("id");
+  });
+
+  it("preserves an explicit plain format on generated output", () => {
+    expect(
+      normalizeMessage({ role: "assistant", content_format: "plain" }).content_format,
+    ).toBe("plain");
   });
 
   it("merges cron deliveries with canonical string ids", () => {
@@ -31,6 +43,10 @@ describe("message normalization", () => {
     );
 
     expect(messages.map((message) => message.id)).toEqual(["delivery-1", "7"]);
-    expect(messages[0]).toMatchObject({ role: "cron", content: "done" });
+    expect(messages[0]).toMatchObject({
+      role: "cron",
+      content: "done",
+      content_format: "markdown",
+    });
   });
 });
