@@ -394,6 +394,10 @@ Quiet and borderless on the page colour: 52px, menu button left (below `lg`), ti
 - **Rows** are 36px, `rounded-control`, 14px, `ink-2` at rest, `hover` wash on hover, `hover-2` plus `ink` when active. An open project defers the highlight to its active chat row, so two rows never read as selected.
 - **Structure.** Wordmark at 17px 600, then two action rows (New project, Search with a shortcut hint), an optional filter field when there are more than six projects, a scrolling nav with "Pinned" and "Projects" dividers (13px 500 `ink-3`), and Settings pinned at the foot. Project tiles are 24px rounded-7 squares on `field` with an emoji or initial; branches indent 16px per level with a branch glyph.
 - **Unread** scheduled reports are an `accent` dot on the project and a `accent-tint` count pill on the Scheduled row; both hue-free.
+- **Status dots** (`StatusDot`, 8px) on every chat and collapsed project, from the activity snapshot: `orange` pulsing while an approval waits, `ink-2` pulsing while running, `red` for a failed run nobody has opened, `accent` for an unseen reply. The open chat uses its own `RunDot`. A **Home** row heads the action rows and carries the app badge's count as an `accent-tint` pill.
+
+### Home
+The reading column (768px) on `page`, sections in the order they matter — Needs you, Running, New replies, Scheduled, Projects — each a sentence-case 13px `ink-3` label over 44px rows: a 32px project tile, a 14px 500 "Project · chat" line with a 12px `ink-3` relative time, a 13px `ink-2` detail clamped to two lines (mono for an approval's command), and a `StatusDot`. Empty sections are omitted; with nothing waiting, one `ink-2` line says so.
 
 ### Messages
 - **User bubble.** Right-aligned, `raised` (dark) or `#f4f4f4` (light), 22px radius, 16px / 1.55, `px-4 py-2.5`, no outline. Attachments sit above it; recovered file chips below.
@@ -447,6 +451,10 @@ Sections are a 14px 600 title, optional 13px `ink-3` description, then rows divi
 - **Tool rows.** A collapsible "N tool calls" header (13px `ink-2`), then 32px rows: icon, mono 13px 500 tool name (identifiers are data, so they are mono), a mono 12px `ink-3` preview, and a status mark. Running is a 12px spinner ring; done is an `ink-3` check; failed is an 8px `red` dot. Detail expands under a 1px `line` rule.
 - **Run dot, run status line, thinking chip.** Neutral by default; the status line pairs a 9-pixel loader with a label and an elapsed timer in mono `ink-3`.
 - **Toast.** One at a time, 44px pill on `raised` with `shadow-overlay`, a `red` dot for an error, an inline action and a dismiss; it rises in 200ms.
+- **Approval attention.** Arriving from the approval's notification, the card takes a 2px `orange` outline (an outline, because `shadow-card` owns box-shadow) that fades over 300ms after ~1.6s, and its first choice takes focus.
+
+### Project panels
+Files and What changed are sheets; What changed uses the `wide` sheet (760px) because a diff reads in columns. Files: 48px rows with a 40px thumbnail or file tile, name, and `ink-3` size · age. What changed: a mono summary (branch, counts in `green`/`red`), then 40px file rows with a 20px status letter chip, mono path (directory in `ink-3`), +/− counts and a disclosure chevron; a patch expands into an `inset` well, mono 12px, added and removed lines on `green-tint` / `red-tint`, scrolling sideways in its own box. Bring in a chat is a dialog (`max-w-md`) with a filter field and two-line rows (title, then `ink-3` source · messages · age).
 
 ### Motion grammar
 Short ease-out fades and small rises; panels slide; nothing bounces. Durations are tokens (`--duration-micro` 80, `quick` 150, `fast` 200, `medium` 250, `slow` 300ms); easings are `--ease-out-strong` `cubic-bezier(0.23, 1, 0.32, 1)` for anything entering, `--ease-drawer` `cubic-bezier(0.32, 0.72, 0, 1)` for the drawer, plus `--ease-smooth-out` for the run dot and `--ease-link` for the link underline. Nothing eases in.

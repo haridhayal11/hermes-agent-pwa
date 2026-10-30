@@ -98,3 +98,29 @@ export function subscribeChanges(
   emitter.on("change", listener);
   return () => emitter.off("change", listener);
 }
+
+/**
+ * Run state changes, for the browser's Home view, sidebar dots and app badge.
+ *
+ * Deliberately not a durable change event. Nothing has to be replayed — the
+ * browser re-reads `/api/activity` whenever it reconnects — and the native
+ * client answers every durable event with a full refresh, which three or four
+ * transitions per run would turn into churn. So these never touch
+ * `api_change_events`, never get a sequence, and only the browser feed
+ * (`/api/changes`) forwards them.
+ */
+export function publishActivity(payload: Record<string, unknown>): void {
+  emitter.emit("activity", {
+    sequence: 0,
+    type: "run.changed",
+    occurredAt: Date.now(),
+    payload,
+  } satisfies ApiChangeEvent);
+}
+
+export function subscribeActivity(
+  listener: (event: ApiChangeEvent) => void,
+): () => void {
+  emitter.on("activity", listener);
+  return () => emitter.off("activity", listener);
+}

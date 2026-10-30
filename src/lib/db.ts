@@ -260,6 +260,10 @@ function migrate(db: Database.Database) {
   // general-chat-setup.ts). Hidden is all that happens by default — the
   // Hermes session is kept — and Settings → Scheduled can delete these later.
   addColumn(db, "project_sessions", "retired_at", "INTEGER");
+  // 1 on a session brought in from elsewhere (CLI, Telegram) rather than
+  // created here. Deleting or renaming it in this app stays local: the
+  // transcript is the user's, and it predates this app knowing about it.
+  addColumn(db, "project_sessions", "imported", "INTEGER NOT NULL DEFAULT 0");
   addColumn(db, "queued_messages", "session_id", "TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_queued_session
     ON queued_messages(project_id, session_id, created_at)`);
@@ -272,12 +276,15 @@ function migrate(db: Database.Database) {
   backfillProjectSessions(db);
   backfillLastChatSessionIds(db);
   migrateCronReadState(db);
+  migrateRunSeenState(db);
   backfillQueuedSessionIds(db);
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_project_sessions_scheduled
       ON project_sessions(project_id) WHERE kind = 'scheduled';
     CREATE INDEX IF NOT EXISTS idx_cron_deliveries_unread
       ON cron_deliveries(project_id, session_id, read_at);
+    CREATE INDEX IF NOT EXISTS idx_runs_unseen
+      ON runs(seen_at, status);
     CREATE TRIGGER IF NOT EXISTS project_sessions_kind_insert
       BEFORE INSERT ON project_sessions
       WHEN NEW.kind NOT IN ('chat', 'scheduled')
@@ -298,6 +305,17 @@ function migrateCronReadState(db: Database.Database) {
   if (columns.some((column) => column.name === "read_at")) return;
   addColumn(db, "cron_deliveries", "read_at", "INTEGER");
   db.exec(`UPDATE cron_deliveries SET read_at = ts WHERE read_at IS NULL`);
+}
+
+/** A run is "seen" once someone looked at the chat after it settled — the
+ * Home view and the app badge count the ones nobody has. Every run from before
+ * that existed has been seen by definition, or an upgrade would light up the
+ * whole history at once. */
+function migrateRunSeenState(db: Database.Database) {
+  const columns = db.prepare(`PRAGMA table_info(runs)`).all() as { name: string }[];
+  if (columns.some((column) => column.name === "seen_at")) return;
+  addColumn(db, "runs", "seen_at", "INTEGER");
+  db.exec(`UPDATE runs SET seen_at = COALESCE(ended_at, started_at) WHERE seen_at IS NULL`);
 }
 
 /**

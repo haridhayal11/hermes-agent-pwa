@@ -43,8 +43,27 @@ self.addEventListener("push", (event) => {
       payload.kind === "approval" || payload.kind === "question",
     timestamp: payload.ts || Date.now(),
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    Promise.all([
+      self.registration.showNotification(title, options),
+      setBadge(payload.badge),
+    ]),
+  );
 });
+
+/* The app icon's count, as the server counted it when this push went out:
+ * approvals, replies nobody has opened and unread reports. The page keeps it
+ * current while open; this is what keeps it current while the app is closed.
+ * iOS 16.4+ allows it for a Home Screen app with notification permission. */
+async function setBadge(count) {
+  if (typeof count !== "number" || !("setAppBadge" in self.navigator)) return;
+  try {
+    if (count > 0) await self.navigator.setAppBadge(count);
+    else await self.navigator.clearAppBadge();
+  } catch {
+    // refused or unsupported: the notification itself still shows
+  }
+}
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();

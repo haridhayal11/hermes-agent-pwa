@@ -154,8 +154,11 @@ export async function DELETE(req: Request, ctx: RouteContext<"/api/projects/[id]
   if (dropSession) {
     const client = hermesForProject(id);
     // A Bot Chat outlives the project: it is the Bot's, and the Desktop, the
-    // CLI and other Bots all still write to it.
-    const sessions = listProjectSessions(id, true).filter((s) => s.bot_chat !== 1);
+    // CLI and other Bots all still write to it. An imported chat outlives it
+    // too: it was brought in from elsewhere, and goes back to being only there.
+    const sessions = listProjectSessions(id, true).filter(
+      (s) => s.bot_chat !== 1 && s.imported !== 1,
+    );
     for (const session of [...sessions].reverse()) {
       try {
         await client.deleteSession(session.session_id);

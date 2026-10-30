@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { ActivityProvider } from "@/components/ActivityContext";
 import { AgentNameProvider } from "@/components/AgentNameContext";
 import { LaunchNormalizer } from "@/components/LaunchNormalizer";
 import { PreferencesProvider } from "@/components/PreferencesContext";
@@ -156,7 +157,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           * AppShell and is just as installable as anything else. */}
         <LaunchNormalizer />
         <PreferencesProvider>
-          <AgentNameProvider initial={agentName}>{children}</AgentNameProvider>
+          <AgentNameProvider initial={agentName}>
+            <ActivityProvider>{children}</ActivityProvider>
+          </AgentNameProvider>
         </PreferencesProvider>
       </body>
     </html>

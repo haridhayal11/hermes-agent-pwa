@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useThread } from "@/hooks/useThread";
 import {
   AssistantMessage,
@@ -35,9 +35,13 @@ import {
 } from "@/lib/model-options";
 import { ToolsetsSheet } from "@/components/chat/ToolsetsSheet";
 import { ProjectSettingsSheet } from "@/components/nav/ProjectSettings";
+import { JobSheet, type JobDraft } from "@/components/settings/JobSheet";
+import { exportThread } from "@/lib/export-thread";
+import { parseExportFormat } from "@/lib/transcript-export";
 import { Toast } from "@/components/ui/Toast";
 import { useRunStatus } from "@/components/chat/RunStatusContext";
 import { useAppActions } from "@/components/AppActionsContext";
+import { useActivity } from "@/components/ActivityContext";
 import { usePreferences } from "@/components/PreferencesContext";
 import { useStatus } from "@/hooks/useStatus";
 import { useModels } from "@/hooks/useModels";
@@ -101,8 +105,8 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
   } = thread;
 
   const router = useRouter();
-  const { openSearch } = useAppActions();
-  const { features } = useStatus();
+  const { openSearch, openPanel } = useAppActions();
+  const { features, version } = useStatus();
   /* Shared with the picker so the inventory is fetched once. Its `current` is
    * the only honest source for the gateway's model — /v1/capabilities reports
    * the virtual "hermes-agent" alias, which is not a model anyone selected. */
@@ -113,6 +117,8 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
   const [modelOpen, setModelOpen] = useState(false);
   const [toolsetsOpen, setToolsetsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** "Repeat this…": the prompt a new scheduled job starts from */
+  const [jobDraft, setJobDraft] = useState<JobDraft | null>(null);
   /** text pushed into the composer — "edit and resend", or a starter prompt */
   const [seed, setSeed] = useState<{ text: string; nonce: number }>();
   const seedComposer = useCallback(
@@ -247,6 +253,76 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [general, markScheduledRead]);
 
+  /* A finished reply nobody has opened is what Home and the app badge count.
+   * This chat is open, so it marks itself seen: on arrival, on coming back to
+   * the foreground, and the moment a run watched here ends. Visibility is the
+   * test, not an attached stream — iOS keeps that open behind the lock screen. */
+  const { refresh: refreshActivity } = useActivity();
+  const markSeen = useCallback(
+    async (watchedRunId?: string) => {
+      if (document.visibilityState !== "visible") return;
+      const response = await fetch(
+        `/api/projects/${projectId}/sessions/${session.session_id}/seen`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(watchedRunId ? { runId: watchedRunId } : {}),
+        },
+      ).catch(() => null);
+      if (response?.ok) refreshActivity();
+    },
+    [projectId, session.session_id, refreshActivity],
+  );
+
+  useEffect(() => {
+    void markSeen();
+    const onVisibility = () => void markSeen();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [markSeen]);
+
+  /* A transient, neutral line — an answer to a command, or news that a link
+   * was stale. Errors keep their own toast, which outranks this one. */
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  /* An approval's notification opens this chat with ?approval=<run id>. If
+   * the card is here, it takes focus; if activity already says that run is
+   * not waiting, it was answered somewhere else and the reader is told so
+   * rather than left looking for a card that will never come. Either way the
+   * parameter goes, so a reload doesn't repeat it. */
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const approvalTarget = searchParams.get("approval");
+  const { activity, bySession } = useActivity();
+  // The history API, not router.replace: the latter re-renders the server
+  // page, which refetches the whole transcript to drop a query string.
+  const clearApprovalTarget = useCallback(() => {
+    window.history.replaceState(window.history.state, "", pathname);
+  }, [pathname]);
+  const attention = Boolean(approvalTarget && approval?.runId === approvalTarget);
+  const live = bySession.get(session.session_id);
+  const stillWaiting = live?.state === "approval" && live.runId === approvalTarget;
+  const staleApproval = Boolean(approvalTarget && !attention && activity && !stillWaiting);
+  useEffect(() => {
+    if (!staleApproval) return;
+    const timer = setTimeout(clearApprovalTarget, 4000);
+    return () => clearTimeout(timer);
+  }, [staleApproval, clearApprovalTarget]);
+  const shownNotice =
+    notice ?? (staleApproval ? "That approval was already answered" : null);
+
+  const previousPhase = useRef(phase);
+  useEffect(() => {
+    const was = previousPhase.current;
+    previousPhase.current = phase;
+    if (was !== "idle" && phase === "idle" && runId) void markSeen(runId);
+  }, [phase, runId, markSeen]);
+
   /* The chip drives model_options.reasoning on the run, so it is scoped to
    * whatever will actually run — the pinned model, else the gateway's own.
    * `undefined` hides it: a model advertising no reasoning has nothing to set,
@@ -365,6 +441,60 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
           router.push(`/p/${projectId}/s/${body.session.id}`);
           return;
         }
+        case "approve":
+        case "deny": {
+          if (!approval) {
+            raiseError("Nothing is waiting for approval");
+            return;
+          }
+          const word = rest.split(/\s+/)[0]?.toLowerCase() ?? "";
+          const choice =
+            command.id === "deny" ? "deny" : word === "" ? "once" : word;
+          // The card's own fallback when the event names no choices.
+          const offered = approval.choices.length > 0 ? approval.choices : ["once", "deny"];
+          if (!offered.includes(choice)) {
+            raiseError(
+              command.id === "approve" && !["once", "session", "always"].includes(choice)
+                ? "Use /approve, /approve session or /approve always"
+                : `This approval doesn't offer “${choice}”`,
+            );
+            return;
+          }
+          await thread.respondApproval(choice, command.id === "deny" && word === "all");
+          return;
+        }
+        case "version":
+          setNotice(version ? `Hermes ${version}` : "This gateway doesn't report its version");
+          return;
+        case "save": {
+          const format = parseExportFormat(rest);
+          if (!format) {
+            raiseError("Use /save md or /save json");
+            return;
+          }
+          const failure = await exportThread(projectId, session.session_id, format);
+          if (failure) raiseError(failure);
+          return;
+        }
+        case "sessions":
+        case "resume":
+          if (general) {
+            raiseError("General keeps a single chat");
+            return;
+          }
+          openPanel(
+            command.id === "resume" && rest
+              ? { kind: "import", query: rest, resume: true }
+              : { kind: "import" },
+          );
+          return;
+        case "diff":
+          if (!project.cwd) {
+            raiseError("This project has no working directory — set one in Edit project");
+            return;
+          }
+          openPanel({ kind: "diff" });
+          return;
         // steer and queue never reach here — the composer turns them straight
         // back into a send with the branch forced.
         case "steer":
@@ -372,7 +502,21 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
           return;
       }
     },
-    [openSearch, projectId, raiseError, retry, router, session.session_id, stop],
+    [
+      openSearch,
+      openPanel,
+      projectId,
+      raiseError,
+      retry,
+      router,
+      session.session_id,
+      stop,
+      approval,
+      thread,
+      version,
+      general,
+      project.cwd,
+    ],
   );
 
   // Tool calls happen *before* the reply they produce, but the reply only
@@ -409,6 +553,26 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
             ? "Running tools"
             : "Working";
 
+  /* "Repeat this…" makes a scheduled job of a prompt. Only on the default
+   * profile: the cron watcher reads that profile's jobs and no other, so a
+   * Bot's job would fire and never reach this app. The job is its own
+   * session — the project's instructions don't travel with it — so the
+   * working directory, which the prompt most often depends on, is written in. */
+  const canRepeat = !project.profile;
+  const commandContext = useMemo(
+    () => ({ approval: approval !== null, cwd: Boolean(project.cwd) }),
+    [approval, project.cwd],
+  );
+  const repeatPrompt = (content: string) => {
+    const firstLine = content.trim().split("\n")[0] ?? "";
+    setJobDraft({
+      name: firstLine.length > 48 ? `${firstLine.slice(0, 47).trimEnd()}…` : firstLine,
+      prompt: project.cwd ? `Working directory: ${project.cwd}\n\n${content.trim()}` : content.trim(),
+      origin:
+        "Runs on its own schedule, without this project's instructions, and reports into General.",
+    });
+  };
+
   const renderMessage = (message: ThreadMessage, index: number) => {
     const isLast = index === messages.length - 1;
     if (message.role === "user") {
@@ -427,6 +591,7 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
               onEdit={
                 index === lastUserIndex ? () => seedComposer(message.content) : undefined
               }
+              onRepeat={canRepeat ? () => repeatPrompt(message.content) : undefined}
             />
           }
         />
@@ -598,7 +763,7 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
         </button>
       </div>
 
-      {error && (
+      {error ? (
         <div className="px-safe pointer-events-none z-30 mx-auto w-full max-w-3xl pb-1">
           <Toast
             message={error}
@@ -607,6 +772,18 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
             onDismiss={thread.dismissError}
           />
         </div>
+      ) : (
+        shownNotice && (
+          <div className="px-safe pointer-events-none z-30 mx-auto w-full max-w-3xl pb-1">
+            <Toast
+              message={shownNotice}
+              onDismiss={() => {
+                setNotice(null);
+                if (staleApproval) clearApprovalTarget();
+              }}
+            />
+          </div>
+        )
       )}
 
       {/* The decision box, directly above the input it interrupts. Capped at
@@ -624,6 +801,8 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
               <ApprovalCard
                 approval={approval}
                 onRespond={(choice, all) => void thread.respondApproval(choice, all)}
+                attention={attention}
+                onAttended={clearApprovalTarget}
               />
             ) : (
               pinnedQuestion && (
@@ -657,6 +836,7 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
         thinkingEffort={supportsReasoning ? effortOf(selection.modelOptions) : undefined}
         onThinkingChange={setThinking}
         errorNonce={errorSeq}
+        commandContext={commandContext}
       />
 
       <ModelPicker
@@ -674,6 +854,12 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
         sessionId={session.session_id}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+      />
+      <JobSheet
+        initial={jobDraft ?? undefined}
+        open={jobDraft !== null}
+        onClose={() => setJobDraft(null)}
+        onSaved={() => setNotice("Scheduled — reports will land in General")}
       />
     </>
   );

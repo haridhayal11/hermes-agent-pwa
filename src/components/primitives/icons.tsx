@@ -301,3 +301,36 @@ export const IconClock = (p: IconProps) => (
     <path d="M12 7v5l3 2" />
   </Svg>
 );
+
+export const IconHome = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 10.5 12 3l9 7.5" />
+    <path d="M5 9v11h14V9" />
+    <path d="M10 20v-6h4v6" />
+  </Svg>
+);
+
+export const IconRepeat = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M17 2l4 4-4 4" />
+    <path d="M3 11V9a3 3 0 0 1 3-3h15" />
+    <path d="M7 22l-4-4 4-4" />
+    <path d="M21 13v2a3 3 0 0 1-3 3H3" />
+  </Svg>
+);
+
+export const IconDiff = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+    <path d="M14 3v6h6" />
+    <path d="M12 11v6M9 14h6" />
+  </Svg>
+);
+
+export const IconImport = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3v12" />
+    <path d="M7 10l5 5 5-5" />
+    <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+  </Svg>
+);

@@ -109,6 +109,14 @@ Never make the browser talk to `:8642` directly.
 | `src/lib/preferences.ts` | Per-device display prefs and their `localStorage` shape. |
 | `src/lib/push.ts` | Web Push / VAPID. The only place the private key is read. |
 | `src/lib/uploads.ts` | Where attachments land, and the download allowlist. |
+| `src/lib/activity.ts` | What is happening across every project — approvals, live runs, unseen replies, unread reports — for Home, the sidebar's dots and the app badge. Database only, so `push.ts` can count the badge. |
+| `src/lib/run-text.ts` | Reads over a run's event log (reply text, preview, pending approval command). Database only; shared by run-manager, activity and push. |
+| `src/components/ActivityContext.tsx` | The activity snapshot on the client. Mounted in the root layout so it survives navigation; sets the app badge. |
+| `src/components/home/HomeView.tsx` | `/`: Needs you, Running, New replies, Scheduled, Projects. |
+| `src/lib/shell-data.ts` | The projects + sessions every AppShell page renders the sidebar from. |
+| `src/lib/project-files.ts` | The Files panel's listing: the outbox and the upload folders, never the whole cwd. |
+| `src/lib/git-changes.ts` | "What changed": a hardened, read-only `git status`/`git diff` of the project's cwd. |
+| `src/lib/transcript-export.ts` | `/save` and Export chat: the full transcript as Markdown or JSON. |
 | `src/lib/commands.ts` | The composer's `/` catalogue and its client-side dispatch. |
 | `src/lib/cron-watcher.ts` | Watches Hermes' cron jobs and delivers their output into the General chat. Singleton, started from `src/instrumentation.ts`. |
 | `src/lib/general-chat.ts` | Lookups for General, the one-chat project every bound job reports into. Database only, so anything can import it. |
@@ -258,9 +266,10 @@ bought nothing and cost that. Bottom-anchored overlays (`SearchOverlay`,
 `fixed inset-0` for the same reason.
 
 **iOS pins the home screen icon to the URL you installed from.** Safari's Add
-to Home Screen ignores the manifest's `start_url`, and `/` redirects into the
-most recent project — so the icon ends up bolted to whichever project was open,
-and 404s if that project is later deleted. `LaunchNormalizer` corrects it on
+to Home Screen ignores the manifest's `start_url` — so the icon ends up bolted
+to whichever project was open when it was installed (nearly always one, back
+when `/` redirected into the most recent project), and 404s if that project is
+later deleted. `/` is Home now, which is what the correction lands on. `LaunchNormalizer` corrects it on
 the way in: a *cold launch* of the installed app (session-storage marker,
 `navigate` navigation type, `display-mode: standalone`) is replaced with `/`.
 
@@ -300,11 +309,59 @@ from a blocking inline script, before React (and `--app-height` alongside it). I
 `applyPrefsToDocument()` on purpose — a module import runs after first paint,
 and every cold start would flash the wrong palette. Change one, change both.
 
+**`runs.status` is kept current, and a run is news until it is seen.** The
+column moves `queued` → `running` (when our upstream stream attaches) ↔
+`waiting_for_approval` → terminal. For a long time it went straight from
+`queued` to terminal, so nothing server-side could say "this is waiting on
+you" — and the 60s approval reminder, which re-checks the status, never fired.
+Settled `completed`/`failed` runs are *unseen* until the thread is open and
+**visible** (`POST …/sessions/{id}/seen`, sent on mount, on visibility, and
+with the run id the moment a watched run ends — the browser sees the terminal
+event a beat before `finishRun` settles the row, so `finishRun` keeps an
+existing `seen_at`). An attached stream does not count: iOS keeps it open
+behind the lock screen. Cancelled runs are seen by definition.
+
+`activity.ts` reads all of that into Home, the sidebar's dots and the badge
+(approvals + unseen + unread General reports; a busy chat doesn't count). The
+badge travels in every push (`payload.badge`, counted at send time, after the
+run's state is written) so `sw.js` can set it while the app is closed. Run
+transitions go to the browser as `run.changed` on an **ephemeral** channel
+(`publishActivity`): never persisted, never on `/api/v1/changes` — Android
+answers every durable event with a full refresh, and the browser re-reads
+`/api/activity` on reconnect anyway. `AppShell` must not `router.refresh()` on
+them. On boot, `recoverActiveRuns()` (instrumentation) re-attaches runs the
+last process held — once the gateway answers `/health` (up to 90s), since on a
+host reboot it starts beside this app and attaching at once would fail every
+run with a push each; ones older than six hours are closed quietly, because
+before this every restart stranded one.
+
+An approval push links `?approval=<run id>`. The thread focuses the card and
+drops the parameter with `history.replaceState` (a `router.replace` re-renders
+the server page and refetches the transcript), or says the approval was
+already answered when activity shows that run isn't waiting.
+
 **A dropped upstream stream cannot be resumed, only polled.** `attach()` tries
 one re-attach and then falls back to polling `GET /v1/runs/{id}` until the run
 settles, synthesising the terminal event into our log. It does not pretend to
 resume the token stream: the upstream queue is destroyed on disconnect, so a
 "successful" reattach would silently skip everything emitted in the gap.
+
+**An imported session is never deleted or renamed in Hermes.** "Bring in a
+chat" (`adoptSession`) attaches an existing session from the CLI or Telegram
+to a project under its own id — the project's profile only, never General,
+never one already attached. It is flagged `project_sessions.imported`: removing
+it here, or purging its project, drops the local row and leaves the transcript
+where it came from, and a rename stays local, the same way a Bot Chat's does.
+Forks made from it are ordinary sessions.
+
+**"What changed" runs git as this app's user, read-only and hardened.**
+`git-changes.ts` uses `execFile` (never a shell) in a realpath-checked cwd,
+disables fsmonitor, hooks, external diff and textconv per call, sets
+`GIT_OPTIONAL_LOCKS=0` so it never holds the index lock the agent's own
+`git commit` needs, and caps time, output and patch size. A repo it can't read
+answers 200 with a reason, not an error. Filter drivers can't be turned off
+from the command line; that is not a new exposure, since the agent already
+runs commands as the same user.
 
 **Compaction keeps the session id.** Hermes compacts in place by default, so a
 project's session id is durable for its whole life. That is what makes
@@ -483,9 +540,13 @@ say the opposite.
   `/copy`, `/tools` and `/quit` are CLI-only and Telegram doesn't offer them
   either. One of the 63, `/hermes_live`, is plugin-registered and therefore
   per-install, so it isn't hardcoded.
-  That leaves **12 dispatch** to endpoints this app owns and actually run, and
-  **53 catalogued** — of which **10 `unbuilt`** have an endpoint but no UI yet
-  and 43 are `no-api`, listed greyed with what stands in for them here. Typing
+  That leaves **19 dispatch** to endpoints this app owns and actually run, and
+  **46 catalogued** — of which **4 `unbuilt`** have an endpoint but no UI yet
+  and 42 are `no-api`, listed greyed with what stands in for them here.
+  `/approve` and `/deny` answer the pending card, `/save` exports, `/sessions`
+  and `/resume` bring a session in, and `/diff` reads the working tree here
+  rather than asking the agent; `needs` hides the first two without a pending
+  approval and `/diff` without a cwd. Typing
   a real-but-unavailable command explains itself instead of spending a turn.
   Regenerate from the running instance rather than the docs, and check the
   route table before promoting anything. `/cron` stays absent even though

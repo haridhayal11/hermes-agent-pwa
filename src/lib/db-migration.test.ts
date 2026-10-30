@@ -45,9 +45,21 @@ beforeAll(async () => {
       source_path TEXT,
       ts INTEGER NOT NULL
     );
+    CREATE TABLE runs (
+      run_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      prompt_preview TEXT
+    );
     INSERT INTO projects
       (id, name, session_id, created_at, last_active_at, archived)
       VALUES ('project', 'Project', 'chat', 10, 20, 0);
+    INSERT INTO runs (run_id, project_id, session_id, status, started_at, ended_at)
+      VALUES ('old-run', 'project', 'chat', 'completed', 11, 12),
+             ('stranded-run', 'project', 'chat', 'queued', 13, NULL);
     INSERT INTO project_sessions
       (session_id, project_id, title, parent_session_id, created_at, last_active_at, archived)
       VALUES ('chat', 'project', 'Chat', NULL, 10, 20, 0);
@@ -88,6 +100,15 @@ describe("Scheduled inbox migration", () => {
         `SELECT COUNT(*) AS count FROM project_sessions WHERE kind = 'scheduled'`,
       ).get(),
     ).toEqual({ count: 0 });
+  });
+
+  it("treats every run from before seen tracking as already seen", () => {
+    expect(
+      migrated.prepare(`SELECT run_id, seen_at FROM runs ORDER BY run_id`).all(),
+    ).toEqual([
+      { run_id: "old-run", seen_at: 12 },
+      { run_id: "stranded-run", seen_at: 13 },
+    ]);
   });
 
   it("leaves every pre-Bot-Mode project on the default profile", () => {

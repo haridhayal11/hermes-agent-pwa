@@ -8,11 +8,17 @@ import { ProjectSidebar } from "@/components/nav/ProjectSidebar";
 import { HeaderMenu } from "@/components/nav/HeaderMenu";
 import { SearchOverlay } from "@/components/nav/SearchOverlay";
 import { ShortcutsSheet } from "@/components/nav/ShortcutsSheet";
+import { FilesSheet } from "@/components/nav/FilesSheet";
+import { DiffSheet } from "@/components/nav/DiffSheet";
+import { ImportSessionDialog } from "@/components/nav/ImportSessionDialog";
+import { Toast } from "@/components/ui/Toast";
+import { exportThread } from "@/lib/export-thread";
 import { RunStatusProvider } from "@/components/chat/RunStatusContext";
 import { RunDot } from "@/components/chat/RunDot";
 import { useShortcuts } from "@/hooks/useShortcuts";
 import { sessionsRecentFirst } from "@/lib/session-order";
-import { AppActionsProvider } from "@/components/AppActionsContext";
+import { AppActionsProvider, type ProjectPanel } from "@/components/AppActionsContext";
+import { useActivity } from "@/components/ActivityContext";
 import { IconEdit, IconMenu } from "@/components/primitives/icons";
 import type { Project, ProjectSession } from "@/lib/chat-types";
 
@@ -56,7 +62,13 @@ export function AppShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  /** Files, What changed, Bring in a chat — opened from the header menu or a
+   *  slash command; one at a time, always about the open project */
+  const [panel, setPanel] = useState<ProjectPanel | null>(null);
+  /** a shell-level failure with nowhere else to go — an export from the menu */
+  const [shellError, setShellError] = useState<string | null>(null);
   const router = useRouter();
+  const { refresh: refreshActivity } = useActivity();
 
   // The current project's chats in sidebar order, for ⌥↑ / ⌥↓.
   const siblings = useMemo(
@@ -113,6 +125,21 @@ export function AppShell({
             replacementSessionId?: string;
           };
         };
+        // Run transitions only move the activity dots and the badge. They
+        // arrive several times per run, and a server re-render of the whole
+        // shell for each one would be churn mid-stream — so this is checked
+        // before the ".changed" rule below, which would otherwise catch it.
+        if (event.type === "run.changed") {
+          refreshActivity();
+          return;
+        }
+        if (
+          event.type?.startsWith("cron.") ||
+          event.type?.startsWith("session.") ||
+          event.type?.startsWith("project.")
+        ) {
+          refreshActivity();
+        }
         const payload = event.payload;
         const deletedSessionIds = payload?.deletedSessionIds;
         const replacementSessionId = payload?.replacementSessionId;
@@ -139,12 +166,12 @@ export function AppShell({
       }
     });
     return () => source.close();
-  }, [activeId, activeSessionId, router]);
+  }, [activeId, activeSessionId, router, refreshActivity]);
 
   return (
     <div className="h-app flex w-full overflow-hidden bg-page">
       <RunStatusProvider>
-        <AppActionsProvider openSearch={() => setSearchOpen(true)}>
+        <AppActionsProvider openSearch={() => setSearchOpen(true)} openPanel={setPanel}>
           <ProjectSidebar
             projects={projects}
             sessions={sessions}
@@ -211,6 +238,15 @@ export function AppShell({
                     activeSessionId={activeSessionId}
                     onSearch={() => setSearchOpen(true)}
                     onShortcuts={() => setShortcutsOpen(true)}
+                    onPanel={setPanel}
+                    onExport={
+                      activeProject && activeSessionId
+                        ? async () => {
+                            const failure = await exportThread(activeProject.id, activeSessionId);
+                            setShellError(failure);
+                          }
+                        : undefined
+                    }
                   />
                   {!activeProject?.general && (
                   <button
@@ -229,6 +265,11 @@ export function AppShell({
               </div>
             </header>
 
+            {shellError && (
+              <div className="px-safe pointer-events-none z-30 mx-auto w-full max-w-3xl pt-1">
+                <Toast message={shellError} tone="error" onDismiss={() => setShellError(null)} />
+              </div>
+            )}
             <main className="flex min-h-0 flex-1 flex-col">{children}</main>
           </div>
         </AppActionsProvider>
@@ -244,6 +285,27 @@ export function AppShell({
           open={newChatOpen}
           onClose={() => setNewChatOpen(false)}
         />
+      )}
+      {activeProject && (
+        <>
+          <FilesSheet
+            projectId={activeProject.id}
+            open={panel?.kind === "files"}
+            onClose={() => setPanel(null)}
+          />
+          <DiffSheet
+            projectId={activeProject.id}
+            open={panel?.kind === "diff"}
+            onClose={() => setPanel(null)}
+          />
+          <ImportSessionDialog
+            projectId={activeProject.id}
+            open={panel?.kind === "import"}
+            query={panel?.kind === "import" ? panel.query : undefined}
+            resume={panel?.kind === "import" ? panel.resume : undefined}
+            onClose={() => setPanel(null)}
+          />
+        </>
       )}
       <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
       <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />

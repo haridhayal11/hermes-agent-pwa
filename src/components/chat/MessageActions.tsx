@@ -5,6 +5,7 @@ import {
   IconCheck,
   IconCopy,
   IconEdit,
+  IconRepeat,
   IconRetry,
   IconShare,
 } from "@/components/primitives/icons";
@@ -55,6 +56,7 @@ export function MessageActions({
   persistent = false,
   onRetry,
   onEdit,
+  onRepeat,
 }: {
   content: string;
   createdAt?: number;
@@ -62,6 +64,8 @@ export function MessageActions({
   persistent?: boolean;
   onRetry?: () => void;
   onEdit?: () => void;
+  /** turn this prompt into a scheduled job */
+  onRepeat?: () => void;
 }) {
   const hydrated = useHydrated();
   const canShare = useCanShare();
@@ -119,6 +123,17 @@ export function MessageActions({
           className={buttonClass}
         >
           <IconEdit size={16} />
+        </button>
+      )}
+      {onRepeat && (
+        <button
+          type="button"
+          onClick={onRepeat}
+          aria-label="Repeat on a schedule"
+          title="Repeat on a schedule"
+          className={buttonClass}
+        >
+          <IconRepeat size={16} />
         </button>
       )}
       {onRetry && (

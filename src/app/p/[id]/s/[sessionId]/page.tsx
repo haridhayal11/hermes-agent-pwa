@@ -3,13 +3,9 @@ import { db } from "@/lib/db";
 import { AppShell } from "@/components/AppShell";
 import { messagesForSession } from "@/lib/project-messages";
 import { ChatThread } from "../../ChatThread";
-import type {
-  Project,
-  ProjectSession,
-  ThreadMessage,
-} from "@/lib/chat-types";
+import type { ProjectSession, ThreadMessage } from "@/lib/chat-types";
 import { toThreadMessages, type RawThreadMessage } from "@/lib/thread-messages";
-import { withProjectNavigation } from "@/lib/project-sessions";
+import { loadProject, loadShellData } from "@/lib/shell-data";
 
 export const dynamic = "force-dynamic";
 
@@ -19,32 +15,14 @@ export default async function SessionPage({
   params: Promise<{ id: string; sessionId: string }>;
 }) {
   const { id, sessionId } = await params;
-  const storedProject = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(id) as
-    | Omit<Project, "scheduled_session_id" | "unread_scheduled_count">
-    | undefined;
+  const project = loadProject(id);
   const session = db
     .prepare(
       `SELECT * FROM project_sessions WHERE project_id = ? AND session_id = ? AND archived = 0`,
     )
     .get(id, sessionId) as ProjectSession | undefined;
-  if (!storedProject || !session) notFound();
-  const project = withProjectNavigation(storedProject) as Project;
-
-  const projects = (db
-    .prepare(
-      `SELECT * FROM projects WHERE archived = 0
-       ORDER BY pinned DESC, last_active_at DESC`,
-    )
-    .all() as Omit<Project, "scheduled_session_id" | "unread_scheduled_count">[])
-    .map(withProjectNavigation) as Project[];
-  const sessions = db
-    .prepare(
-      `SELECT ps.* FROM project_sessions ps
-       JOIN projects p ON p.id = ps.project_id
-       WHERE ps.archived = 0 AND p.archived = 0
-       ORDER BY ps.last_active_at DESC, ps.created_at DESC, ps.session_id ASC`,
-    )
-    .all() as ProjectSession[];
+  if (!project || !session) notFound();
+  const { projects, sessions } = loadShellData();
 
   let initialMessages: ThreadMessage[] = [];
   try {

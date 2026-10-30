@@ -1,24 +1,20 @@
-import { redirect } from "next/navigation";
 import { APP_NAME } from "@/lib/branding";
-import { db } from "@/lib/db";
 import { AppShell } from "@/components/AppShell";
+import { HomeView } from "@/components/home/HomeView";
+import { loadShellData } from "@/lib/shell-data";
 import { EmptyState } from "./EmptyState";
-import type { Project } from "@/lib/chat-types";
-import { withProjectNavigation } from "@/lib/project-sessions";
 
 export const dynamic = "force-dynamic";
 
+/* Home: what is happening across every project. It used to redirect into the
+ * most recent one, which hid a run finishing or an approval waiting anywhere
+ * else until you went looking. Live state comes from ActivityContext; the
+ * server only supplies the project list. */
 export default function Home() {
-  const projects = (db
-    .prepare(`SELECT * FROM projects WHERE archived = 0 ORDER BY pinned DESC, last_active_at DESC`)
-    .all() as Omit<Project, "scheduled_session_id" | "unread_scheduled_count">[])
-    .map(withProjectNavigation) as Project[];
-
-  if (projects.length > 0) redirect(`/p/${projects[0].id}`);
-
+  const { projects, sessions } = loadShellData();
   return (
-    <AppShell projects={projects} title={APP_NAME}>
-      <EmptyState />
+    <AppShell projects={projects} sessions={sessions} title={projects.length ? "Home" : APP_NAME}>
+      {projects.length > 0 ? <HomeView projects={projects} /> : <EmptyState />}
     </AppShell>
   );
 }

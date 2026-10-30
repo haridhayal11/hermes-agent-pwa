@@ -4,12 +4,18 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Menu, MenuItem, MenuSeparator } from "@/components/ui/Menu";
 import {
+  IconDiff,
   IconEdit,
+  IconFolder,
+  IconHome,
+  IconImport,
   IconKeyboard,
   IconMore,
   IconSearch,
   IconSettings,
+  IconShare,
 } from "@/components/primitives/icons";
+import type { ProjectPanel } from "@/components/AppActionsContext";
 import { ProjectSettingsSheet } from "./ProjectSettings";
 import { useKeyboardMod } from "@/hooks/useShortcuts";
 import type { Project } from "@/lib/chat-types";
@@ -26,6 +32,8 @@ export function HeaderMenu({
   activeSessionId,
   onSearch,
   onShortcuts,
+  onPanel,
+  onExport,
 }: {
   project?: Project;
   activeSessionId?: string;
@@ -33,6 +41,10 @@ export function HeaderMenu({
   onSearch?: () => void;
   /** opens the keyboard cheatsheet — only offered where there is a keyboard */
   onShortcuts?: () => void;
+  /** opens one of the open project's panels, owned by the shell */
+  onPanel?: (panel: ProjectPanel) => void;
+  /** exports the open chat as Markdown */
+  onExport?: () => void;
 }) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -45,6 +57,16 @@ export function HeaderMenu({
           <>
             {project && (
               <MenuItem
+                icon={<IconHome size={16} />}
+                label="Home"
+                onSelect={() => {
+                  close();
+                  router.push("/");
+                }}
+              />
+            )}
+            {project && (
+              <MenuItem
                 icon={<IconEdit size={16} />}
                 label="Edit project"
                 onSelect={() => {
@@ -53,6 +75,49 @@ export function HeaderMenu({
                 }}
               />
             )}
+            {project && onPanel && (
+              <MenuItem
+                icon={<IconFolder size={16} />}
+                label="Files"
+                onSelect={() => {
+                  close();
+                  onPanel({ kind: "files" });
+                }}
+              />
+            )}
+            {/* Only with a working directory: there is nothing else to diff. */}
+            {project?.cwd && onPanel && (
+              <MenuItem
+                icon={<IconDiff size={16} />}
+                label="What changed"
+                onSelect={() => {
+                  close();
+                  onPanel({ kind: "diff" });
+                }}
+              />
+            )}
+            {project && onExport && (
+              <MenuItem
+                icon={<IconShare size={16} />}
+                label="Export chat"
+                onSelect={() => {
+                  close();
+                  onExport();
+                }}
+              />
+            )}
+            {/* General keeps a single chat; there is nowhere to bring one in. */}
+            {project && !project.general && onPanel && (
+              <MenuItem
+                icon={<IconImport size={16} />}
+                label="Bring in a chat…"
+                onSelect={() => {
+                  close();
+                  onPanel({ kind: "import" });
+                }}
+              />
+            )}
+            {project && <MenuSeparator />}
             {onSearch && (
               <MenuItem
                 icon={<IconSearch size={16} />}

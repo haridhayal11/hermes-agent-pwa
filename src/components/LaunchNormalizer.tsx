@@ -8,13 +8,13 @@ import { APP_SLUG } from "@/lib/branding";
  *
  * iOS Safari's Add to Home Screen pins the URL of the page you were on. It
  * does not use the manifest's `start_url`, and there is no way to ask it to —
- * so installing from a project (which is nearly always, since `/` redirects
- * straight into the most recent one) bolts the icon to that project forever.
- * Delete the project and the app launches into a 404.
+ * so installing from a project (which was nearly always, back when `/`
+ * redirected straight into the most recent one) bolts the icon to that
+ * project forever. Delete the project and the app launches into a 404.
  *
  * So the app corrects it on the way in: a cold launch of the installed web app
- * goes to `/`, and `/` picks the most recently active project. The icon
- * behaves like a home button rather than a bookmark.
+ * goes to `/`, which is Home — what is waiting on you across every project.
+ * The icon behaves like a home button rather than a bookmark.
  *
  * Everything here is a guard against doing that at the wrong moment:
  *

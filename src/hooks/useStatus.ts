@@ -19,6 +19,8 @@ import { useEffect, useState } from "react";
 interface StatusPayload {
   hermes: {
     reachable: boolean;
+    /** null when the gateway doesn't say (lib/hermes-version.ts) */
+    version?: string | null;
     capabilities: Record<string, unknown> | null;
   };
   active_runs: { run_id: string }[];
@@ -114,6 +116,7 @@ export function useStatus(pollMs = 20_000) {
   return {
     reachable: status?.hermes.reachable ?? false,
     model: readModel(status?.hermes.capabilities ?? null),
+    version: status?.hermes.version ?? null,
     features: readFeatures(status?.hermes.capabilities ?? null),
     activeRuns: status?.active_runs.length ?? 0,
     loaded: status !== null,

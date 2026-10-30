@@ -6,6 +6,9 @@
  * a job fires on Hermes' schedule, not on a visit, and a poller that only
  * started when someone loaded the app would miss every overnight run.
  *
+ * The same is true of runs a previous process left live: they settle here or
+ * never.
+ *
  * Two guards. `NEXT_RUNTIME` keeps it out of the edge runtime, which has no
  * timers worth the name and no better-sqlite3. `NEXT_PHASE` keeps it out of
  * `next build`, which spins up parallel workers to collect routes — each one
@@ -18,4 +21,9 @@ export async function register() {
 
   const { startCronWatcher } = await import("./lib/cron-watcher");
   startCronWatcher();
+
+  // Runs the last process was holding have no upstream stream any more, and
+  // nothing else will ever settle them.
+  const { runManager } = await import("./lib/run-manager");
+  runManager.recoverActiveRuns();
 }

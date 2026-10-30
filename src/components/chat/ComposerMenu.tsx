@@ -8,6 +8,7 @@ import {
   REASON_LABEL,
   SLASH_COMMANDS,
   UNROUTED_REASON,
+  type CommandNeed,
   type SlashCommand,
 } from "@/lib/commands";
 import type { HermesFeatures } from "@/hooks/useStatus";
@@ -48,6 +49,7 @@ export function useMenuItems(
   mode: MenuMode | null,
   features: HermesFeatures,
   running: boolean,
+  has: Partial<Record<CommandNeed, boolean>> = {},
 ): { items: MenuItem[]; commands: SlashCommand[] } {
   const skills = useSkillCatalogue(useProjectBot());
 
@@ -80,6 +82,7 @@ export function useMenuItems(
       // rather than offer a button that can only fail.
       if (c.requires && !features[c.requires]) return false;
       if (c.activeRunOnly && !running) return false;
+      if (c.needs && !has[c.needs]) return false;
       if (!q) return true;
       return (
         c.name.startsWith(q) ||
@@ -89,7 +92,7 @@ export function useMenuItems(
     });
 
     /* The catalogue is Telegram's whole menu, and it is listed whole — a bare
-     * "/" here shows what a bare "/" shows in the Telegram client. The twelve
+     * "/" here shows what a bare "/" shows in the Telegram client. The ones
      * that work sit above it under their own heading, so nothing is buried;
      * the box scrolls. */
     const catalogue = COMMAND_CATALOGUE.filter((c) => {
@@ -125,7 +128,7 @@ export function useMenuItems(
         })),
       ],
     };
-  }, [mode, skills, features, running]);
+  }, [mode, skills, features, running, has]);
 }
 
 export function ComposerMenu({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAgentName } from "@/components/AgentNameContext";
 import type { PendingApproval } from "@/lib/chat-types";
 import { IconCheck, IconCross } from "@/components/primitives/icons";
@@ -27,9 +27,14 @@ const CHOICE_COPY: Record<string, { label: string; hint: string }> = {
 export function ApprovalCard({
   approval,
   onRespond,
+  attention = false,
+  onAttended,
 }: {
   approval: PendingApproval;
   onRespond: (choice: string, all: boolean) => void;
+  /** arrived from the approval's own notification: take focus and say so */
+  attention?: boolean;
+  onAttended?: () => void;
 }) {
   /* Hermes coalesces identical approvals behind one prompt, but a turn that
    * fires several *different* dangerous calls asks several times. `all`
@@ -41,12 +46,36 @@ export function ApprovalCard({
   const rendered = choices.length > 0 ? choices : ["once", "deny"];
   const persists = rendered.includes("always") && approval.patternKey;
 
+  /* Tapping the notification should land on the decision, not near it. The
+   * first choice takes focus — a keyboard can answer at once — and the card
+   * draws an orange ring briefly, the hue that means "this is waiting on you". */
+  const firstChoice = useRef<HTMLButtonElement>(null);
+  const [ringed, setRinged] = useState(false);
+  useEffect(() => {
+    if (!attention) return;
+    const button = firstChoice.current;
+    button?.focus({ preventScroll: true });
+    button?.scrollIntoView({ block: "nearest" });
+    // No cleanup: onAttended drops the link's parameter, which turns
+    // `attention` off again, and that must not cancel the ring mid-flash.
+    setTimeout(() => setRinged(true), 0);
+    setTimeout(() => setRinged(false), 1600);
+    onAttended?.();
+  }, [attention, onAttended]);
+
   return (
     <div
       className={`w-full overflow-hidden rounded-card shadow-card ${
         approval.smartDenied ? "bg-red-tint" : "bg-surface"
       }`}
-      style={{ animation: "pop-in var(--duration-fast) var(--ease-out-strong) both" }}
+      style={{
+        animation: "pop-in var(--duration-fast) var(--ease-out-strong) both",
+        // An outline, not a ring: shadow-card owns box-shadow outright.
+        outline: "2px solid",
+        outlineOffset: "-2px",
+        outlineColor: ringed ? "var(--orange)" : "transparent",
+        transition: "outline-color var(--duration-slow) var(--ease-out-strong)",
+      }}
     >
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
@@ -88,12 +117,13 @@ export function ApprovalCard({
         )}
 
         <div className="mt-3 flex flex-col gap-0.5">
-          {rendered.map((choice) => {
+          {rendered.map((choice, index) => {
             const copy = CHOICE_COPY[choice] ?? { label: choice, hint: "" };
             const deny = choice === "deny";
             return (
               <button
                 key={choice}
+                ref={index === 0 ? firstChoice : undefined}
                 type="button"
                 onClick={() => onRespond(choice, all)}
                 className="-mx-2 flex min-h-10 w-[calc(100%+16px)] items-center gap-2.5 rounded-control px-2 py-1.5

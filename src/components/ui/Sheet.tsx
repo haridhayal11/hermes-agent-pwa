@@ -16,11 +16,14 @@ export function Sheet({
   onClose,
   children,
   label,
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
   children: ReactNode;
   label: string;
+  /** for content that reads in columns — a diff — on a desktop */
+  wide?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -51,7 +54,9 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        className="scroll-area absolute inset-y-0 left-0 flex w-[88vw] max-w-[420px] flex-col overflow-y-auto overscroll-contain bg-canvas shadow-overlay"
+        className={`scroll-area absolute inset-y-0 left-0 flex flex-col ${
+          wide ? "w-[94vw] max-w-[760px]" : "w-[88vw] max-w-[420px]"
+        } overflow-y-auto overscroll-contain bg-canvas shadow-overlay`}
         style={{
           animation: "panel-in-right var(--duration-fast) var(--ease-out-strong) both",
           // the panel spans the full height including the notch, so it owns

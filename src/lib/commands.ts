@@ -22,8 +22,8 @@
  *      endpoint it already owns. These are the only ones that do anything.
  *   2. CATALOGUE — the rest of Telegram's menu, listed with Hermes' own
  *      description and why it isn't actionable here. Listing them is the
- *      point: a menu that showed twelve entries would imply Hermes has twelve
- *      commands.
+ *      point: a menu that showed only the runnable entries would imply that is
+ *      all Hermes has.
  *
  * Names, descriptions and argument hints are verbatim from `COMMAND_REGISTRY`
  * so the two surfaces read the same.
@@ -46,7 +46,17 @@ export type CommandId =
   | "skills"
   | "toolsets"
   | "status"
-  | "search";
+  | "search"
+  | "approve"
+  | "deny"
+  | "version"
+  | "save"
+  | "sessions"
+  | "resume"
+  | "diff";
+
+/** What a command needs from the chat on screen before it is worth offering. */
+export type CommandNeed = "approval" | "cwd";
 
 export type CommandCategory =
   | "Session"
@@ -72,6 +82,12 @@ export interface SlashCommand {
   requires?: "run_steer" | "session_fork" | "model_options" | "toolsets" | "skills_api";
   /** hidden unless a run is in flight */
   activeRunOnly?: boolean;
+  /**
+   * Hidden from the menu unless the chat has this: a pending approval, or a
+   * project working directory. Typing it anyway still reaches the thread,
+   * which says why it can't run.
+   */
+  needs?: CommandNeed;
 }
 
 /** Commands this app actually carries out. */
@@ -174,6 +190,65 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     category: "Info",
     description: "Search project names, instructions and prompts (this app only)",
   },
+  {
+    name: "approve",
+    id: "approve",
+    category: "Session",
+    description: "Approve a pending dangerous command",
+    args: "[session|always]",
+    takesText: true,
+    needs: "approval",
+  },
+  {
+    name: "deny",
+    id: "deny",
+    category: "Session",
+    description: "Deny a pending dangerous command",
+    args: "[all]",
+    takesText: true,
+    needs: "approval",
+  },
+  {
+    // Hermes' formats are json, md and html; this exports what the browser
+    // can render back faithfully, which is the first two.
+    name: "save",
+    id: "save",
+    category: "Session",
+    description: "Export the current conversation",
+    args: "[md|json]",
+  },
+  {
+    // Hermes' /sessions resumes in place; here a session belongs to one
+    // project, so "resume" means bringing it into this one.
+    name: "sessions",
+    id: "sessions",
+    category: "Session",
+    description: "Browse sessions started elsewhere and bring one into this project",
+  },
+  {
+    name: "resume",
+    id: "resume",
+    category: "Session",
+    description: "Bring a previously-named session into this project",
+    args: "[name]",
+    takesText: true,
+  },
+  {
+    // Upstream asks the agent's terminal; this app reads the project's
+    // working tree itself, read-only (lib/git-changes.ts).
+    name: "diff",
+    id: "diff",
+    category: "Info",
+    description: "Show git changes in the working directory",
+    needs: "cwd",
+  },
+  {
+    name: "version",
+    aliases: ["v"],
+    id: "version",
+    category: "Info",
+    description: "Show Hermes Agent version",
+  },
 ];
 
 /**
@@ -205,13 +280,10 @@ export const COMMAND_CATALOGUE: CatalogueCommand[] = [
   // ---- Session -----------------------------------------------------------
   { name: "/start", description: "Acknowledge platform start pings without a reply", category: "Session", reason: "no-api", note: "a handshake for chat platforms; there's nothing to acknowledge here" },
   { name: "/topic", args: "[off|help|session-id]", description: "Enable or inspect Telegram DM topic sessions", category: "Session", reason: "no-api", note: "one project is one topic here" },
-  { name: "/save", args: "<json|md|html> [filename] [redact]", description: "Export the current conversation (bare /save shows usage)", category: "Session", reason: "unbuilt", note: "would be exported here from the loaded transcript" },
   { name: "/undo", args: "[N]", description: "Back up N user turns and re-prompt (default 1)", category: "Session", reason: "no-api" },
   { name: "/compress", aliases: ["compact"], args: "[here [N] | focus topic | --preview]", description: "Compress conversation context (add 'here [N]' to keep recent N turns; --preview shows what would happen)", category: "Session", reason: "no-api", note: "Hermes compacts in place on its own, which is what keeps the session id" },
   { name: "/rollback", args: "[number] [--all]", description: "List or restore filesystem checkpoints (restores keep your hand-edits; --all overrides)", category: "Session", reason: "no-api" },
   { name: "/pause", args: "[reason | off]", description: "Pause new work globally (emergency stop); '/pause off' resumes", category: "Session", reason: "no-api", note: "/stop cancels this run" },
-  { name: "/approve", args: "[session|always]", description: "Approve a pending dangerous command", category: "Session", reason: "unbuilt", note: "the approval card does this when one is pending" },
-  { name: "/deny", args: "[all] [reason]", description: "Deny a pending dangerous command (optionally with a reason)", category: "Session", reason: "unbuilt", note: "the approval card does this when one is pending" },
   { name: "/background", aliases: ["bg", "btw"], args: "<prompt>", description: "Run a prompt in the background", category: "Session", reason: "no-api" },
   { name: "/agents", aliases: ["tasks"], description: "Show active agents and running tasks", category: "Session", reason: "no-api", note: "subagent cards show this run's delegates" },
   { name: "/goal", args: "[text | show | pause | clear | status]", description: "Set a standing goal Hermes works on across turns until achieved", category: "Session", reason: "no-api", note: "project instructions are the durable equivalent" },
@@ -223,8 +295,6 @@ export const COMMAND_CATALOGUE: CatalogueCommand[] = [
   { name: "/egress", args: "[status]", description: "Show Docker egress proxy status", category: "Session", reason: "no-api" },
   { name: "/context", aliases: ["ctx"], args: "[all]", description: "Show detailed context window view with usage gauge, category breakdown, compression stats, and throughput", category: "Session", reason: "no-api" },
   { name: "/sethome", aliases: ["set-home"], description: "Set this chat as the home channel", category: "Session", reason: "no-api" },
-  { name: "/resume", args: "[name]", description: "Resume a previously-named session", category: "Session", reason: "unbuilt", note: "GET /api/sessions exists; the project rail is the current answer" },
-  { name: "/sessions", description: "Browse and resume previous sessions", category: "Session", reason: "unbuilt", note: "GET /api/sessions exists; the project rail is the current answer" },
   { name: "/restart", description: "Gracefully restart the gateway after draining active runs", category: "Session", reason: "no-api" },
 
   // ---- Configuration -----------------------------------------------------
@@ -252,7 +322,6 @@ export const COMMAND_CATALOGUE: CatalogueCommand[] = [
   // ---- Info --------------------------------------------------------------
   { name: "/whoami", description: "Show your slash command access (admin / user)", category: "Info", reason: "no-api" },
   { name: "/profile", description: "Show active profile name and home directory", category: "Info", reason: "no-api" },
-  { name: "/diff", args: "[staged|all|session] [--stat] [path...]", description: "Show git changes in the working directory", category: "Info", reason: "no-api", note: "ask the agent — it has the terminal tool" },
   { name: "/commands", args: "[page]", description: "Browse all commands and skills (paginated)", category: "Info", reason: "no-api", note: "this menu is it" },
   { name: "/help", args: "[skills|<filter>]", description: "Show available commands (/help skills lists skill commands, /help <text> filters)", category: "Info", reason: "no-api", note: "this menu is it" },
   { name: "/usage", args: "[reset [--force]]", description: "Show token usage and rate limits; `reset` redeems a banked Codex limit reset", category: "Info", reason: "unbuilt", note: "run.completed and /api/sessions both carry token counts" },
@@ -260,7 +329,6 @@ export const COMMAND_CATALOGUE: CatalogueCommand[] = [
   { name: "/insights", args: "[days]", description: "Show usage insights and analytics", category: "Info", reason: "no-api" },
   { name: "/platform", args: "<pause|resume|list> [name]", description: "Pause, resume, or list a failing gateway platform", category: "Info", reason: "no-api" },
   { name: "/update", description: "Update Hermes Agent to the latest version", category: "Info", reason: "no-api" },
-  { name: "/version", aliases: ["v"], description: "Show Hermes Agent version", category: "Info", reason: "unbuilt", note: "/health returns it; shown in Settings → Connection" },
   { name: "/debug", args: "[nous|local]", description: "Upload debug report (system info + logs) and get shareable links", category: "Info", reason: "no-api" },
 ];
 

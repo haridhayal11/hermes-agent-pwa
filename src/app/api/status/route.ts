@@ -1,5 +1,6 @@
 import { hermes } from "@/lib/hermes";
 import { db } from "@/lib/db";
+import { hermesVersion } from "@/lib/hermes-version";
 
 // Live proxy: never cached. Without this Next prerenders a zero-argument
 // GET handler at build time and serves the snapshot forever.
@@ -20,9 +21,13 @@ export async function GET() {
     )
     .all();
 
+  const healthBody = health.status === "fulfilled" ? health.value : null;
+  const capabilitiesBody = capabilities.status === "fulfilled" ? capabilities.value : null;
+
   return Response.json({
     hermes: {
       reachable: health.status === "fulfilled",
+      version: hermesVersion(healthBody, capabilitiesBody),
       health: health.status === "fulfilled" ? health.value : null,
       capabilities: capabilities.status === "fulfilled" ? capabilities.value : null,
       error: health.status === "rejected" ? String(health.reason) : null,

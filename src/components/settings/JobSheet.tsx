@@ -34,14 +34,25 @@ const SCHEDULE_HINT =
 const ROW_ACTION =
   "-mx-3 flex min-h-10 items-center rounded-control px-3 text-left text-ui transition-[transform,background-color] duration-150 enabled:hover:bg-hover enabled:active:scale-[0.99] disabled:opacity-40";
 
+/** A new job started from somewhere else — "Repeat this…" on a message. */
+export interface JobDraft {
+  name: string;
+  prompt: string;
+  /** a sentence above the form saying where this came from and what differs */
+  origin?: string;
+}
+
 export function JobSheet({
   job,
+  initial,
   open,
   onClose,
   onSaved,
 }: {
   /** absent for a new job */
   job?: Job;
+  /** seeds a new job; ignored when editing */
+  initial?: JobDraft;
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
@@ -52,6 +63,7 @@ export function JobSheet({
       {open && (
         <JobForm
           job={job}
+          initial={job ? undefined : initial}
           onClose={onClose}
           onSaved={onSaved}
         />
@@ -62,16 +74,18 @@ export function JobSheet({
 
 function JobForm({
   job,
+  initial,
   onClose,
   onSaved,
 }: {
   job?: Job;
+  initial?: JobDraft;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [name, setName] = useState(job?.name ?? "");
+  const [name, setName] = useState(job?.name ?? initial?.name ?? "");
   const [schedule, setSchedule] = useState(job?.schedule_display ?? "");
-  const [prompt, setPrompt] = useState(job?.prompt ?? "");
+  const [prompt, setPrompt] = useState(job?.prompt ?? initial?.prompt ?? "");
   const [skills, setSkills] = useState<string[]>(job?.skills ?? []);
   const [repeat, setRepeat] = useState(
     job?.repeat?.times != null ? String(job.repeat.times) : "",
@@ -79,8 +93,10 @@ function JobForm({
   /* One control, two shapes. `destination` is "general" when this app
    * delivers it into the General chat, or "hermes" when the gateway posts it,
    * and `deliver` is only meaningful in the second. */
+  // A job repeated from a chat reports back into this app by default — the
+  // reader started it here, so here is where they expect to see it land.
   const [destination, setDestination] = useState(
-    job?.binding ? "general" : job && job.deliver !== "local" ? "hermes" : "",
+    job?.binding ? "general" : job && job.deliver !== "local" ? "hermes" : initial ? "general" : "",
   );
   const [deliver, setDeliver] = useState(
     job && job.deliver !== "local" ? job.deliver : "",
@@ -184,6 +200,7 @@ function JobForm({
 
   return (
     <form onSubmit={save} className="flex flex-col gap-5 p-5">
+      {initial?.origin && <p className={HELP_CLASS}>{initial.origin}</p>}
       <div>
         <label htmlFor="job-name" className={LABEL_CLASS}>
           Name

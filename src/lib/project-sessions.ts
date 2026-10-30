@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { publishChange } from "./api-changes";
 import { db } from "./db";
 import { botName, hermesForProject } from "./bots";
-import { HermesApiError } from "./hermes";
+import { HermesApiError, type HermesSession } from "./hermes";
 import { generalChat } from "./general-chat";
 import { createProjectSession, renameProjectSession } from "./project-session";
 import { titleFromPrompt } from "./session-title";
@@ -20,6 +20,8 @@ export interface ProjectSessionRow {
   bot_chat: number;
   /** set when the Scheduled-inbox retirement hid this thread */
   retired_at?: number | null;
+  /** 1 when brought in from another Hermes client (see adoptSession) */
+  imported?: number;
 }
 
 export function sessionDto(session: ProjectSessionRow) {
@@ -220,8 +222,9 @@ export async function renameSession(
   // The local title is the product contract. Older Hermes builds may not have
   // PATCH sessions; a missing mirror must not make a usable local tree fail.
   // A Bot Chat is renamed here only: upstream, its title *is* what makes it
-  // the Bot's canonical chat, and the Desktop shares it.
-  if (session.bot_chat !== 1) {
+  // the Bot's canonical chat, and the Desktop shares it. An imported chat
+  // keeps the name it has wherever it came from.
+  if (session.bot_chat !== 1 && session.imported !== 1) {
     try {
       await renameProjectSession(sessionId, normalized, hermesForProject(projectId));
     } catch (error) {
@@ -383,7 +386,11 @@ export async function deleteSessionSubtree(projectId: string, sessionId: string)
   if (remainingChats.length === 0) return { kind: "last_session" as const };
 
   const ids = subtree.map((session) => session.session_id);
-  await deleteUpstreamSessions(projectId, [...ids].reverse());
+  // An imported chat leaves this app only; its branches were made here.
+  const upstream = subtree
+    .filter((session) => session.imported !== 1)
+    .map((session) => session.session_id);
+  await deleteUpstreamSessions(projectId, upstream.reverse());
 
   const replacement = remainingChats.sort((a, b) => b.last_active_at - a.last_active_at)[0];
   purgeLocalSessions(projectId, ids, replacement.session_id);
@@ -395,4 +402,64 @@ export async function deleteSessionSubtree(projectId: string, sessionId: string)
     replacementSessionId: replacement.session_id,
   });
   return { kind: "deleted" as const, sessionId: replacement.session_id };
+}
+
+/** Hermes reports times as epoch seconds, epoch ms or ISO text, by build. */
+export function epochMs(value: string | number | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1e12 ? Math.round(value * 1000) : Math.round(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return epochMs(numeric);
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+export type AdoptResult =
+  | { kind: "adopted"; session: ProjectSessionRow }
+  | { kind: "general" }
+  | { kind: "attached"; projectId: string; projectName: string };
+
+/**
+ * Brings a Hermes session that started somewhere else — the CLI, Telegram —
+ * into this project as one of its chats.
+ *
+ * It is attached, not copied: the same session id, so a turn here continues
+ * the same transcript. That is also why it can belong to one project only,
+ * and why it is flagged `imported` — this app did not create it, so deleting
+ * or renaming it here never reaches Hermes.
+ */
+export function adoptSession(projectId: string, session: HermesSession): AdoptResult {
+  if (generalChat()?.projectId === projectId) return { kind: "general" };
+  const owner = db
+    .prepare(
+      `SELECT s.project_id, p.name FROM project_sessions s
+         JOIN projects p ON p.id = s.project_id
+        WHERE s.session_id = ?`,
+    )
+    .get(session.id) as { project_id: string; name: string } | undefined;
+  if (owner) return { kind: "attached", projectId: owner.project_id, projectName: owner.name };
+
+  const now = Date.now();
+  const created = epochMs(session.started_at) ?? now;
+  const lastActive = epochMs(session.last_active) ?? epochMs(session.ended_at) ?? created;
+  const title = session.title?.trim() || "Imported chat";
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO project_sessions
+        (session_id, project_id, title, parent_session_id, created_at, last_active_at, archived, imported)
+       VALUES (?, ?, ?, NULL, ?, ?, 0, 1)`,
+    ).run(session.id, projectId, title, created, lastActive);
+    // So opening the project lands on the chat just brought in.
+    db.prepare(`UPDATE projects SET last_chat_session_id = ?, last_active_at = ? WHERE id = ?`).run(
+      session.id,
+      now,
+      projectId,
+    );
+  })();
+  publishChange("session.changed", { projectId, sessionId: session.id });
+  return { kind: "adopted", session: getProjectSession(projectId, session.id)! };
 }

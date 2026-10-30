@@ -1,9 +1,20 @@
-import { changesAfter, subscribeChanges, type ApiChangeEvent } from "@/lib/api-changes";
+import {
+  changesAfter,
+  subscribeActivity,
+  subscribeChanges,
+  type ApiChangeEvent,
+} from "@/lib/api-changes";
 
 export const dynamic = "force-dynamic";
 
 function frame(event: ApiChangeEvent) {
   return `id: ${event.sequence}\nevent: change\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+/* No id line: an activity frame is not part of the durable sequence, and
+ * setting the EventSource's last id to 0 would be a lie about where it is. */
+function activityFrame(event: ApiChangeEvent) {
+  return `event: change\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
 export async function GET(request: Request) {
@@ -18,6 +29,7 @@ export async function GET(request: Request) {
       : requested;
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
+  let unsubscribeActivity: (() => void) | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -43,6 +55,13 @@ export async function GET(request: Request) {
           // already closed
         }
       });
+      unsubscribeActivity = subscribeActivity((event) => {
+        try {
+          controller.enqueue(encoder.encode(activityFrame(event)));
+        } catch {
+          // already closed
+        }
+      });
       timer = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(": keepalive\n\n"));
@@ -55,6 +74,7 @@ export async function GET(request: Request) {
         () => {
           if (timer) clearInterval(timer);
           unsubscribe?.();
+          unsubscribeActivity?.();
           try {
             controller.close();
           } catch {
@@ -67,6 +87,7 @@ export async function GET(request: Request) {
     cancel() {
       if (timer) clearInterval(timer);
       unsubscribe?.();
+      unsubscribeActivity?.();
     },
   });
   return new Response(stream, {

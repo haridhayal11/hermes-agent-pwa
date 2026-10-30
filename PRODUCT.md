@@ -43,8 +43,14 @@ dashboard.
   skills, and a tree of durable chat sessions (roots and forks).
 - Runs stream live, can be stopped, steered, and paused on approval requests;
   messages sent during a run queue.
-- Hermes cron jobs can be bound to a project; their reports land in a
-  per-project Scheduled inbox.
+- Hermes cron jobs report into one General chat, as plain messages you can
+  reply to; a prompt in any chat can be turned into one ("Repeat this…").
+- Home (`/`) shows what is waiting across every project: approvals, live runs,
+  replies nobody has opened, unread reports. The sidebar carries the same
+  state as dots, and the app icon carries the count.
+- Per project: the files the agent handed over, a read-only diff of its
+  working directory, an export of the thread, and sessions from the CLI or
+  Telegram brought in as chats.
 - Web Push on completion, approval, question and scheduled report, chosen per
   device.
 - A native Android client exists separately (`android/`) against `/api/v1`;

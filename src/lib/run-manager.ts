@@ -18,7 +18,8 @@ import { outboxDirFor } from "./uploads";
 import { RECOMMEND_FENCE, type Attachment } from "./chat-types";
 import { sendToAll, type PushKind } from "./push";
 import { autoNameSession, getProjectSession } from "./project-sessions";
-import { markdownToPlainText } from "./markdown";
+import { pendingApprovalCommand, replyPreview, runText } from "./run-text";
+import { publishActivity } from "./api-changes";
 
 // api_server.py's /v1/runs event vocabulary (gateway/platforms/api_server.py,
 // _handle_runs / _run_and_close). "run.cancelled" only fires via /stop.
@@ -48,6 +49,15 @@ const APPROVAL_NAG_MS = 60_000;
 // registry entry in a `finally`) and unconsumed buffers expire after five
 // minutes, so there is no point polling for a settle beyond that.
 const POLL_CEILING_MS = 5 * 60_000;
+
+/* A run a previous server process left live is re-attached on boot, and the
+ * usual fallback settles it. Past this age it is closed without asking Hermes
+ * or pushing: those are rows stranded long ago (before run status was kept
+ * current, every restart stranded one), and announcing each as "Run failed"
+ * on upgrade would be a burst of news about nothing. */
+const ORPHAN_SILENT_AFTER_MS = 6 * 60 * 60_000;
+/* How long boot recovery waits for the gateway to come back before it tries. */
+const RECOVERY_WAIT_MS = 90_000;
 
 export interface RunEventRow {
   runId: string;
@@ -498,6 +508,7 @@ class RunManager extends EventEmitter {
       `UPDATE project_sessions SET last_active_at = ? WHERE session_id = ?`,
     ).run(startedAt, targetSessionId);
     void autoNameSession(projectId, targetSessionId, text);
+    publishActivity({ projectId, sessionId: targetSessionId, runId, status: "queued" });
 
     // Fire-and-forget: this holds the one allowed upstream connection to
     // Hermes for the run's whole life and must not be dropped on our side.
@@ -523,11 +534,14 @@ class RunManager extends EventEmitter {
     this.emit(runId, payload);
 
     // An approval blocks the run indefinitely. If nobody is looking at the
-    // stream, nothing else will ever say so.
+    // stream, nothing else will ever say so. The status goes first: the nag
+    // re-checks it, and the badge a push carries is counted from it.
     if (event.event === "approval.request") {
+      this.setStatus(runId, "waiting_for_approval");
       if (this.hasSubscribers(runId)) this.armApprovalNag(runId);
       else void this.notify(runId, "approval");
     }
+    if (event.event === "approval.responded") this.setStatus(runId, "running");
     // Answered, or the run moved on without one — either way stop nagging.
     if (
       event.event === "approval.responded" ||
@@ -536,6 +550,43 @@ class RunManager extends EventEmitter {
       this.clearApprovalNag(runId);
     }
     return seq;
+  }
+
+  /**
+   * Moves a live run between queued, running and waiting_for_approval.
+   *
+   * These used to exist only in the event log and in whichever browser was
+   * replaying it — the column went straight from queued to terminal. That
+   * left nothing on the server able to say "this run is waiting on you",
+   * which is what the approval nag checks and what Home and the badge count.
+   * A settled run is never moved back.
+   */
+  private setStatus(
+    runId: string,
+    status: "running" | "waiting_for_approval",
+    onlyFrom?: "queued",
+  ) {
+    const result = onlyFrom
+      ? db
+          .prepare(`UPDATE runs SET status = ? WHERE run_id = ? AND status = ?`)
+          .run(status, runId, onlyFrom)
+      : db
+          .prepare(
+            `UPDATE runs SET status = ?
+              WHERE run_id = ? AND status != ?
+                AND status NOT IN (${[...TERMINAL_STATUSES].map(() => "?").join(",")})`,
+          )
+          .run(status, runId, status, ...TERMINAL_STATUSES);
+    if (result.changes === 0) return;
+    const run = this.getRun(runId);
+    if (run) {
+      publishActivity({
+        projectId: run.project_id,
+        sessionId: run.session_id,
+        runId,
+        status,
+      });
+    }
   }
 
   /**
@@ -570,59 +621,6 @@ class RunManager extends EventEmitter {
   }
 
   /**
-   * What the agent actually said, reassembled from the message.delta log.
-   *
-   * Ours rather than Hermes': the transcript is fetched separately by the
-   * browser, and a notification must not wait on a round trip to build its
-   * own body.
-   */
-  private runText(runId: string): string {
-    const rows = db
-      .prepare(
-        `SELECT event_json FROM run_events WHERE run_id = ? ORDER BY seq ASC`,
-      )
-      .all(runId) as { event_json: string }[];
-
-    let text = "";
-    let output = "";
-    for (const row of rows) {
-      try {
-        const event = JSON.parse(row.event_json) as {
-          event?: string;
-          delta?: unknown;
-          output?: unknown;
-        };
-        if (event.event === "message.delta" && typeof event.delta === "string") {
-          text += event.delta;
-        } else if (event.event === "run.completed" && typeof event.output === "string") {
-          output = event.output;
-        }
-      } catch {
-        // a malformed row must not cost the notification
-      }
-    }
-    // A turn into a Bot Chat that the Desktop holds live, or one admitted
-    // under session authority, runs in the owner's mailbox. Its stream has no
-    // deltas, only a run.completed that carries the whole reply.
-    return text || output;
-  }
-
-  /**
-   * The opening of the reply, for a completion notification.
-   *
-   * This used to be `prompt_preview` — the user's own message — so finishing a
-   * run buzzed the phone with the text they had just typed. It read as a
-   * notification *of their own message* rather than of the answer, which is
-   * both useless and confusing. The reply is the news.
-   *
-   * Fenced blocks are dropped first: a turn that opens with a code block or a
-   * `${RECOMMEND_FENCE}` card would otherwise notify with a brace.
-   */
-  private replyPreview(runId: string): string {
-    return markdownToPlainText(this.runText(runId)).slice(0, 140);
-  }
-
-  /**
    * The recommendation card the run ended on, if it ended on one.
    *
    * A run that stops to ask something is `run.completed` like any other, so
@@ -631,7 +629,7 @@ class RunManager extends EventEmitter {
    * them.
    */
   private pendingQuestion(runId: string): string | null {
-    const text = this.runText(runId);
+    const text = runText(runId);
     if (!text.includes(RECOMMEND_FENCE)) return null;
 
     // Last fence wins: the agent may quote the format before using it.
@@ -675,21 +673,29 @@ class RunManager extends EventEmitter {
       // this the reader already knows, because they wrote it.
       const prompt = run.prompt_preview?.trim().slice(0, 120) ?? "";
 
+      const command = kind === "approval" ? pendingApprovalCommand(runId) : null;
       const body =
         kind === "approval"
-          ? "Waiting for your approval."
+          ? command
+            ? `Approve? ${command.replace(/\s+/g, " ").slice(0, 80)}`
+            : "Waiting for your approval."
           : kind === "question"
             ? detail || "Waiting on your answer."
             : status === "failed"
               ? `Run failed.${prompt ? ` ${prompt}` : ""}`
               : status === "cancelled"
                 ? "Run stopped."
-                : this.replyPreview(runId) || "Finished.";
+                : replyPreview(runId) || "Finished.";
 
       await sendToAll({
         title: name,
         body,
-        url: `/p/${run.project_id}/s/${run.session_id}`,
+        // The thread focuses the approval card when it arrives with this, and
+        // says so when the decision was already made somewhere else.
+        url:
+          kind === "approval"
+            ? `/p/${run.project_id}/s/${run.session_id}?approval=${encodeURIComponent(runId)}`
+            : `/p/${run.project_id}/s/${run.session_id}`,
         tag: `${APP_SLUG}-${run.project_id}-${run.session_id}`,
         kind,
       });
@@ -705,9 +711,15 @@ class RunManager extends EventEmitter {
     const watched = this.hasSubscribers(runId);
     this.clearApprovalNag(runId);
 
+    const endedAt = Date.now();
+    // A run the user stopped is not news to them; anything else waits to be
+    // seen in the thread (see markSessionSeen).
+    // COALESCE: a thread that watched the terminal event arrive may already
+    // have said so (markSessionSeen with this run id) before this row settles.
     db.prepare(
-      `UPDATE runs SET status = ?, ended_at = ? WHERE run_id = ?`,
-    ).run(status, Date.now(), runId);
+      `UPDATE runs SET status = ?, ended_at = ?, seen_at = COALESCE(seen_at, ?)
+        WHERE run_id = ?`,
+    ).run(status, endedAt, status === "cancelled" ? endedAt : null, runId);
     // Only synthesize a close event when there's no real terminal event to
     // tell subscribers the run is over (our attach() loop ending abnormally
     // without ever seeing run.completed/failed/cancelled from Hermes).
@@ -715,6 +727,15 @@ class RunManager extends EventEmitter {
       this.emit(runId, { runId, seq: -1, event: { event: "_local.closed" }, ts: Date.now() });
     }
     this.emit(`${runId}:closed`);
+    const settled = this.getRun(runId);
+    if (settled) {
+      publishActivity({
+        projectId: settled.project_id,
+        sessionId: settled.session_id,
+        runId,
+        status,
+      });
+    }
 
     if (!watched || Date.now() - started > NOTIFY_AFTER_MS) {
       const question = status === "completed" ? this.pendingQuestion(runId) : null;
@@ -766,6 +787,10 @@ class RunManager extends EventEmitter {
     const res = await this.clientForRun(runId).streamRunEvents(runId);
     const body = res.body;
     if (!body) throw new Error("Hermes run stream had no body");
+    // The row is written once Hermes has accepted the run; holding its stream
+    // is what makes it running as far as anyone here can tell. Only from
+    // queued: a re-attach must not clear an approval that is still pending.
+    this.setStatus(runId, "running", "queued");
 
     const reader = body.getReader();
     const decoder = new TextDecoder();
@@ -913,6 +938,67 @@ class RunManager extends EventEmitter {
     all?: boolean,
   ) {
     await this.clientForRun(runId).approveRun(runId, choice, all);
+  }
+
+  /**
+   * Settles runs that were live when the previous server process died.
+   *
+   * Nothing else would: the upstream stream died with that process, so no
+   * terminal event will ever arrive, and a row left `running` keeps its chat
+   * looking busy — on Home, in the sidebar and in the badge — for good.
+   */
+  recoverActiveRuns() {
+    const rows = db
+      .prepare(
+        `SELECT run_id, project_id, started_at FROM runs
+          WHERE status IN (${ACTIVE_RUN_STATUSES.map(() => "?").join(",")})`,
+      )
+      .all(...ACTIVE_RUN_STATUSES) as { run_id: string; project_id: string; started_at: number }[];
+    const cutoff = Date.now() - ORPHAN_SILENT_AFTER_MS;
+    const recent: typeof rows = [];
+    for (const row of rows) {
+      if (row.started_at >= cutoff) {
+        recent.push(row);
+        continue;
+      }
+      const now = Date.now();
+      // A replaying thread needs a terminal event or it spins forever.
+      this.appendEvent(row.run_id, {
+        event: "run.failed",
+        run_id: row.run_id,
+        synthesized: true,
+      });
+      db.prepare(
+        `UPDATE runs SET status = 'failed', ended_at = ?, seen_at = ? WHERE run_id = ?`,
+      ).run(now, now, row.run_id);
+    }
+    if (recent.length === 0) return;
+
+    // On a host reboot the gateway comes up beside this process, not before
+    // it. Attaching at once would find Hermes unreachable, give up after the
+    // poll's three errors, and push "Run failed" for every run that was live.
+    // So wait — bounded — for it to answer first.
+    void this.whenHermesAnswers(RECOVERY_WAIT_MS).then(() => {
+      for (const row of recent) {
+        this.attach(row.run_id, row.project_id).catch((err) => {
+          console.error(`[run-manager] recovery failed for ${row.run_id}:`, err);
+          this.finishRun(row.run_id, "failed", true);
+        });
+      }
+    });
+  }
+
+  /** Resolves once the default gateway answers /health, or after `limitMs`. */
+  private async whenHermesAnswers(limitMs: number): Promise<void> {
+    const deadline = Date.now() + limitMs;
+    while (Date.now() < deadline) {
+      try {
+        await hermesFor(null).health();
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 2_000).unref?.());
+      }
+    }
   }
 
   /** Replays persisted events after `afterSeq`, then live-streams new ones until unsubscribed. */

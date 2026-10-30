@@ -7,6 +7,7 @@ import {
   IconChevronRight,
   IconClock,
   IconEdit,
+  IconHome,
   IconMore,
   IconPin,
   IconPlus,
@@ -15,7 +16,9 @@ import {
   IconTrash,
 } from "@/components/primitives/icons";
 import { Menu, MenuItem } from "@/components/ui/Menu";
-import { RunDot } from "@/components/chat/RunDot";
+import { RunDot, StatusDot } from "@/components/chat/RunDot";
+import { useRunStatus } from "@/components/chat/RunStatusContext";
+import { useActivity } from "@/components/ActivityContext";
 import { useAppActions } from "@/components/AppActionsContext";
 import { useKeyboardMod, useShortcuts } from "@/hooks/useShortcuts";
 import { APP_NAME } from "@/lib/branding";
@@ -53,6 +56,9 @@ function SessionBranch({
   const children = childrenByParent.get(session.session_id) ?? [];
   const active = session.session_id === activeSessionId;
   const general = session.session_id === generalSessionId;
+  // The open chat reports its own phase, instantly; every other chat reports
+  // what the server knows about it.
+  const elsewhere = useActivity().bySession.get(session.session_id);
   // The row itself turns into the rename field or the delete confirmation,
   // rather than a browser prompt() — which an installed app draws as a bare
   // system dialog, and which some browsers suppress altogether.
@@ -139,7 +145,7 @@ function SessionBranch({
               ) : null}
             </span>
             <span className="min-w-0 flex-1 truncate">{session.title}</span>
-            {active && <RunDot />}
+            {active ? <RunDot /> : elsewhere && <StatusDot state={elsewhere.state} />}
             {general && unreadScheduledCount > 0 && (
               <span className="min-w-5 rounded-full bg-accent-tint px-1.5 text-center text-meta font-medium text-ink tabular-nums">
                 {unreadScheduledCount}
@@ -256,6 +262,8 @@ export function ProjectSidebar({
 }) {
   const router = useRouter();
   const { openSearch } = useAppActions();
+  const { phase } = useRunStatus();
+  const { byProject, activity } = useActivity();
   // shortcut hint on the Search row, only where there is a keyboard
   const mod = useKeyboardMod();
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -410,8 +418,14 @@ export function ProjectSidebar({
               {project.emoji ?? (project.name.trim().charAt(0).toUpperCase() || "•")}
             </span>
             <span className="min-w-0 flex-1 truncate">{project.name}</span>
-            {active && !isOpen && <RunDot />}
-            {project.unread_scheduled_count > 0 && (
+            {/* Open, the chat rows below carry their own dots. */}
+            {!isOpen &&
+              (active && phase !== "idle" ? (
+                <RunDot />
+              ) : (
+                byProject.has(project.id) && <StatusDot state={byProject.get(project.id)!} />
+              ))}
+            {project.unread_scheduled_count > 0 && !byProject.has(project.id) && (
               <span
                 className="size-2 shrink-0 rounded-full bg-accent"
                 aria-label="Unread scheduled reports"
@@ -511,6 +525,25 @@ export function ProjectSidebar({
         * arrangement — rather than an icon in the header and a button at the
         * foot. */}
       <div className="flex flex-col gap-px px-2 pb-2">
+        {/* Home carries the same count as the app icon: what is waiting on
+          * you across every project. */}
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            router.push("/");
+          }}
+          aria-current={activeProjectId ? undefined : "page"}
+          className={`${sidebarRow} ${activeProjectId ? "" : "bg-hover-2"}`}
+        >
+          <IconHome size={18} className="text-ink-2" />
+          <span className="flex-1">Home</span>
+          {(activity?.badge ?? 0) > 0 && (
+            <span className="min-w-5 rounded-full bg-accent-tint px-1.5 text-center text-meta font-medium text-ink tabular-nums">
+              {activity!.badge}
+            </span>
+          )}
+        </button>
         <button
           type="button"
           onClick={onNewProject}

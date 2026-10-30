@@ -1,6 +1,7 @@
 import webpush from "web-push";
 import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
 import { getMessaging } from "firebase-admin/messaging";
+import { badgeCount } from "./activity";
 import { db } from "./db";
 import { PUSH_KINDS, type PushKind } from "./notification-kinds";
 
@@ -56,6 +57,19 @@ export interface PushPayload {
   /** coalescing key — same tag replaces the previous notification */
   tag?: string;
   kind?: PushKind;
+  /** the app icon's count once this lands; filled in at send time */
+  badge?: number;
+}
+
+/* Counted when the push goes out, after the run's own state is written, so
+ * the number matches what Home will show when the notification is tapped.
+ * A count that can't be read is left out, never guessed. */
+function currentBadge(): number | undefined {
+  try {
+    return badgeCount();
+  } catch {
+    return undefined;
+  }
 }
 
 interface WebSubscriptionRow {
@@ -287,7 +301,7 @@ async function sendWebPush(
   rows: WebSubscriptionRow[],
 ): Promise<SendResult> {
   if (rows.length === 0) return { sent: 0, failed: 0, error: null };
-  const body = JSON.stringify({ ...payload, ts: Date.now() });
+  const body = JSON.stringify({ badge: currentBadge(), ...payload, ts: Date.now() });
   let sent = 0;
   let failed = 0;
   let error: string | null = null;

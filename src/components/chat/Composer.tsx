@@ -25,6 +25,7 @@ import {
   mentionQuery,
   parseCommand,
   REASON_LABEL,
+  type CommandNeed,
   type SlashCommand,
 } from "@/lib/commands";
 import { ThinkingChip } from "./ThinkingChip";
@@ -85,6 +86,7 @@ export function Composer({
   errorNonce = 0,
   placeholder,
   commandsEnabled = true,
+  commandContext,
 }: {
   /** the upload route needs it to decide where a non-image file lands */
   projectId: string;
@@ -122,6 +124,8 @@ export function Composer({
   errorNonce?: number;
   placeholder?: string;
   commandsEnabled?: boolean;
+  /** what this chat has, for commands that only make sense with it — memoise */
+  commandContext?: Partial<Record<CommandNeed, boolean>>;
 }) {
   const { prefs } = usePreferences();
   const agentName = useAgentName();
@@ -197,7 +201,7 @@ export function Composer({
 
   useShortcuts([{ key: "/", mod: true, run: () => inputRef.current?.focus() }]);
 
-  const { items: menuItems } = useMenuItems(menu, features, running);
+  const { items: menuItems } = useMenuItems(menu, features, running, commandContext);
   // Arrow keys skip the unrouted rows; they're listed, not offered.
   const firstSelectable = menuItems.findIndex((i) => !i.disabled);
   const menuOpen = menu !== null && menuItems.length > 0;

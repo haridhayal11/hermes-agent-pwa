@@ -501,7 +501,7 @@ const FEATURE_LABELS: [keyof ReturnType<typeof useStatus>["features"], string][]
 ];
 
 function ConnectionSection() {
-  const { reachable, model, features, activeRuns, loaded } = useStatus();
+  const { reachable, model, version, features, activeRuns, loaded } = useStatus();
   /* useStatus reads /v1/capabilities, which answers "hermes-agent" — the
    * virtual OpenAI-compatible alias, not the model Hermes runs. Only
    * /api/model/options knows that, so prefer it and keep the alias as the
@@ -540,6 +540,12 @@ function ConnectionSection() {
         }
       />
       <SettingsRow label="Endpoint" control={<Meta>{host ?? "…"}</Meta>} />
+      {/* Display only — what the gateway can do is read from its
+        * capabilities below, never inferred from this. */}
+      <SettingsRow
+        label="Version"
+        control={<Meta>{!loaded ? "…" : (version ?? "not reported")}</Meta>}
+      />
       {/* The gateway default. A project's own model is picked from the chip in
         * its composer — model choice is per project, not per device. */}
       <SettingsRow label="Default model" control={<Meta>{resolved ?? "unknown"}</Meta>} />
