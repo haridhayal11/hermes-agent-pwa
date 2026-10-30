@@ -96,6 +96,8 @@ Never make the browser talk to `:8642` directly.
 | `src/lib/app-settings.ts` | Install-wide settings in SQLite — currently just the agent's name. |
 | `src/components/AgentNameContext.tsx` | The agent's name on the client, seeded from the root layout. |
 | `src/components/LaunchNormalizer.tsx` | Sends a cold launch of the installed app to `/` — iOS pins the icon to whatever URL you installed from. Mounted in the root layout, so `/settings` is covered too. |
+| `src/lib/hermes-gateway.ts` | Slash commands, run by the gateway: control-socket ticket, then `slash.exec` over its session-authority `/api/ws`. The only non-`:8642` upstream. |
+| `src/lib/run-events.ts` | Normalises newer upstream run events to the vocabulary every reader was written against; builds the authority-mode approval/clarify bodies. Pure. |
 | `src/lib/hermes.ts` | Typed client for `:8642`. The only place `HERMES_API_KEY` — and any profile's key — is read. `hermes` is the default profile; `hermesFor(profile)` is the `/p/<profile>/` mirror. |
 | `src/lib/bots.ts` | Bot Mode: the profile roster (read off disk, probed over HTTP), Bot Chat resolution, and `hermesForProject()`. |
 | `src/components/ProjectBotContext.tsx` | The open project's Bot on the client: scopes the skill/model/toolset catalogues and the agent's name. |
@@ -110,7 +112,7 @@ Never make the browser talk to `:8642` directly.
 | `src/lib/push.ts` | Web Push / VAPID. The only place the private key is read. |
 | `src/lib/uploads.ts` | Where attachments land, and the download allowlist. |
 | `src/lib/activity.ts` | The notifications feed (approvals, open questions, unseen replies, failures, reports), the sidebar's per-chat dots and the app badge — all derived, nothing stored. Database only, so `push.ts` can count the badge. |
-| `src/lib/run-text.ts` | Reads over a run's event log (reply text, preview, pending approval command). Database only; shared by run-manager, activity and push. |
+| `src/lib/run-text.ts` | Reads over a run's event log (reply text, preview, the pending approval or clarify and the prompt id it must be answered with). Database only; shared by run-manager, activity and push. |
 | `src/components/ActivityContext.tsx` | The activity snapshot on the client. Mounted in the root layout so it survives navigation; sets the app badge. |
 | `src/components/nav/NotificationsPanel.tsx` | The header bell's panel: full screen on a phone, a popover from `sm`. Answers questions and approvals in place. |
 | `src/lib/recommendation.ts` | The `hermes-recommend` card contract, parsed — pure, so the server can read questions too (`RecommendationCard.tsx` is `"use client"`). |
@@ -430,6 +432,26 @@ say the opposite.
   | `run.stopping` | — |
   | `run.completed` / `run.failed` / `run.cancelled` | terminal |
 
+  Upstream at `bf0203a794a` (checked from source, not a running instance)
+  adds more, mostly under session authority. `run-manager` passes every
+  frame through `normalizeUpstreamEvent()` before persisting it, so the log —
+  and the v1 SSE Android reads — keeps the vocabulary above where it can:
+
+  | upstream | in our log |
+  |---|---|
+  | `run.interrupted` (gateway shutdown) | `run.failed`, `interrupted: true` |
+  | `approval.settled` | `approval.responded`, `resolved: true` |
+  | `approval.request` | unchanged, plus `prompt_id`, `execution_generation` |
+  | `clarify.request` | unchanged: `prompt_id`, `execution_generation`, `question`, `choices`, `multi_select` |
+  | `clarify.settled` | unchanged |
+  | `message.interim` | unchanged: `text`, `already_streamed` |
+  | `run.queued` | unchanged |
+
+  A run's status can also be `unknown` (its owner died mid-turn): not
+  terminal, and later turns in its session wait behind it. Polling settles it
+  here as `run.failed` with `unknown: true`, and
+  `POST /api/runs/{id}/resolve-unknown` acknowledges it upstream.
+
   **`run.started` and `hermes.tool.progress` are not on this stream** — both
   exist only on `/api/sessions/{id}/chat/stream`. `_thinking` is deliberately
   withheld as "high-volume UI noise". Anything `useThread` handles beyond the
@@ -453,6 +475,20 @@ say the opposite.
 - **Approval body** is `{"choice": "once"|"session"|"always"|"deny", "all"?: bool}`.
   `choices` on the event is authoritative; `always` persists `pattern_key`,
   which is usually broader than the one command shown, so the card displays it.
+  **Under session authority it is exactly `{request_id, execution_generation,
+  choice}`** — any other key set, `all` included, is `invalid_params`
+  (`respond_run`, `api_server_authority_runs.py`). The values come from the
+  request event, so `run-manager.approveRun` reads them out of our log and
+  the client body never changes.
+- **`/v1/runs/{id}/clarify`** answers the agent's clarify tool mid-run, body
+  `{request_id, execution_generation, answer}` — authority only. A clarify
+  blocks the run like an approval, so it shares `waiting_for_approval`, the
+  nag and the bell; it pushes as kind `question`. The answer is a string; a
+  multi-select's is the JSON array of picked labels (`tools/clarify_tool.py`).
+  While one is pending, a text message sent into that chat answers it
+  (`run-manager.sendMessage`, reported as mode `steered`) rather than
+  queueing behind a run that cannot move — the web composer does the same
+  client-side so the answer doesn't render as a user turn.
 - **Model selection is per run, not per session.** `GET /api/model/options` is
   the real inventory (providers, models, per-model `{fast, reasoning}`) —
   `/v1/models` only lists the virtual `hermes-agent` alias plus configured
@@ -554,30 +590,56 @@ say the opposite.
   Split on the **last** heading: skills are pasted in verbatim and one may well
   contain a `## Response` of its own.
 
-- **Slash commands are not routed.** Still true, and it is the single biggest
-  gap between this app and the CLI. `api_server.py` never imports
-  `gateway/slash_commands.py`, so `/compress` reaches the model as literal
-  text — and no endpoint serves the catalogue either, since it lives in the CLI
-  process (`hermes_cli/commands.py`). So `src/lib/commands.ts` carries the
-  catalogue itself — and the cut it carries is **Telegram's**, not the CLI's.
-  Hermes builds both menus from one `COMMAND_REGISTRY`; `telegram_bot_commands()`
-  takes every entry whose `cli_only` flag is unset, which on 0.20.5 is 63. A
-  phone is a messaging surface, so that is the right list: `/skin`, `/palette`,
+- **Slash commands are not routed over `:8642`.** `api_server.py` never imports
+  `gateway/slash_commands.py`, so `/compress` sent to `/v1/runs` reaches the
+  model as literal text, and no `:8642` endpoint serves the catalogue. So
+  `src/lib/commands.ts` carries the catalogue itself — and the cut it carries
+  is **Telegram's**, not the CLI's. Hermes builds both menus from one
+  `COMMAND_REGISTRY`; `telegram_bot_commands()` takes every entry whose
+  `cli_only` flag is unset, which on 0.20.5 is 63. `/skin`, `/palette`,
   `/copy`, `/tools` and `/quit` are CLI-only and Telegram doesn't offer them
-  either. One of the 63, `/hermes_live`, is plugin-registered and therefore
-  per-install, so it isn't hardcoded.
-  That leaves **19 dispatch** to endpoints this app owns and actually run, and
-  **46 catalogued** — of which **4 `unbuilt`** have an endpoint but no UI yet
-  and 42 are `no-api`, listed greyed with what stands in for them here.
+  either. `/hermes_live` is plugin-registered and per-install, so it isn't
+  hardcoded. **19 dispatch** to endpoints this app owns; **46 are catalogued**.
+
+  **A gateway under session authority runs part of the catalogue itself**, for
+  any client holding a ticket: `slash.exec` on its `/api/ws`
+  (`gateway/session_commands.py`, `tui_gateway/ws.py`). That is the one
+  upstream connection that is not `:8642`, and `hermes-gateway.ts` makes it
+  for this and nothing else:
+
+  - **Discovery and auth go through the control socket**, `<home>/gateway.sock`
+    (or the path in `gateway.sock.path`). `identify` gives `api_origin` (a
+    loopback port the OS picked), `instance_id` and `served_profiles`;
+    `session-ticket` mints a single-use, 30-second, profile-bound ticket. The
+    socket is owner-only and checks the peer uid, so this works only while the
+    app runs as the gateway's user. A Bot is usually served by the root
+    gateway, whose socket mints its tickets.
+  - **The WebSocket takes subprotocols `hermes-gateway-v1` and
+    `hermes-gateway-ticket.<ticket>`, and no `Origin`** — any Origin
+    disqualifies the ticket path. Node's built-in `WebSocket` sends none;
+    `hermes-gateway.test.ts` pins that against a stand-in owner.
+  - **The gateway's allowlist decides, not this menu.** `GATEWAY_COMMANDS`
+    mirrors it. `/restart`, `/compress`, `/undo`, `/rollback`, `/pause`,
+    `/background`, `/update`, `/platform` and the reloads are refused to every
+    such client, and stay greyed. A refusal comes back as 409 with the
+    gateway's own reason and `data.detail`, shown verbatim.
+  - **`exec` output is local to the screen**: the gateway answers the caller
+    and writes nothing to the transcript, as in Telegram. `useThread` carries
+    it across history refreshes; a reload drops it. A `send` result (`/plan`,
+    `/learn`, `/init`, …) is a rewritten prompt, sent as an ordinary message so
+    it queues and streams like any other.
+  - **`/api/commands` is the probe.** The menu offers gateway commands only
+    while it says `available`; otherwise the whole catalogue stays greyed as
+    before. A standalone dashboard on 9119 also serves `/api/ws`, but without
+    session authority and behind its own token; it is not used.
+
   `/approve` and `/deny` answer the pending card, `/save` exports, `/sessions`
   and `/resume` bring a session in, and `/diff` reads the working tree here
   rather than asking the agent; `needs` hides the first two without a pending
-  approval and `/diff` without a cwd. Typing
-  a real-but-unavailable command explains itself instead of spending a turn.
-  Regenerate from the running instance rather than the docs, and check the
-  route table before promoting anything. `/cron` stays absent even though
-  `/api/jobs` is now wired: it is `cli_only` upstream, so Telegram doesn't
-  offer it either, and Settings → Scheduled is where it lives here.
+  approval and `/diff` without a cwd. Typing a real-but-unavailable command
+  explains itself instead of spending a turn. Regenerate from the running
+  instance rather than the docs. `/cron` stays absent: it is `cli_only`
+  upstream, and Settings → Scheduled is where it lives here.
 - **No per-request working directory.** `_create_agent` takes no cwd parameter,
   so `.hermes.md` / `AGENTS.md` discovery always resolves against the gateway's
   own cwd, never per project. A project's directory is stated in the
@@ -600,8 +662,10 @@ say the opposite.
   handler reads `clipboardData.items` and returns *before* `preventDefault()`
   when there is no image on the clipboard, so a text paste is still a text
   paste.
-- **`/api/ws` and `/api/pty` are dashboard-only** (port 9119). Over `:8642`,
-  SSE is the only push transport.
+- **`/api/pty` is dashboard-only** (port 9119). Over `:8642`, SSE is the only
+  push transport. `/api/ws` is used for slash commands only, through the
+  gateway's session-authority listener (above) — never for run events, which
+  stay on `/v1/runs/{id}/events` and run-manager.
 
 - **Bot Mode Bots are profiles, served at `/p/<profile>/`.** Checked against
   upstream `main` (Oct 2026), not a running instance. Bot Mode is Desktop UI over

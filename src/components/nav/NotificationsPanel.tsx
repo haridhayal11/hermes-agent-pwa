@@ -63,15 +63,20 @@ function Row({
 
   // Answering in place: the reply goes into the chat as your next message,
   // exactly as pressing the card's button there would.
+  // A mid-run clarify is the exception: it goes to the run it unblocks.
   async function answer(reply: string) {
     setState("busy");
-    const response = await fetch(
-      `/api/projects/${item.projectId}/sessions/${item.sessionId}/messages`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: reply }),
-      },
+    const response = await (item.clarify && item.runId
+      ? fetch(`/api/runs/${item.runId}/clarify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answer: reply }),
+        })
+      : fetch(`/api/projects/${item.projectId}/sessions/${item.sessionId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: reply }),
+        })
     ).catch(() => null);
     setState(response?.ok ? "done" : "failed");
     refresh();

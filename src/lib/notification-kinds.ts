@@ -33,7 +33,7 @@ export const PUSH_KIND_LABELS: Record<Exclude<PushKind, "test">, string> = {
 export const PUSH_KIND_HINTS: Record<Exclude<PushKind, "test">, string> = {
   run: "When it ends unwatched, or after it has been going longer than a minute.",
   approval: "Immediately if nothing is attached, and after a minute if something is — a locked phone still counts as attached.",
-  question: "A run that stops to ask ends as “completed” like any other, so without this it announces itself as finished.",
+  question: "A run that ends on a question, or stops mid-run to ask one. Without this, the first kind announces itself as finished.",
   job: "The result of a job on Hermes' schedule, in the project it is bound to.",
   "job-failed": "Kept separate: a job that breaks is worth hearing about even when its ordinary reports are not.",
 };

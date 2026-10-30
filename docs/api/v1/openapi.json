@@ -500,6 +500,39 @@
         }
       }
     },
+    "/api/v1/projects/{projectId}/sessions/{sessionId}/command": {
+      "parameters": [{ "$ref": "#/components/parameters/ProjectId" }, { "$ref": "#/components/parameters/SessionId" }],
+      "post": {
+        "operationId": "runSlashCommand",
+        "summary": "Run a Hermes slash command in this session",
+        "description": "Carried out by the gateway itself (`slash.exec` under session authority), not by the model. The gateway decides which commands it runs; a refusal is 409 with its reason in the message. `exec` returns the command's Markdown output, which is not written to the transcript. `send` means the command rewrote itself into a prompt: submit `message` as an ordinary message to run it. 503 when the gateway cannot be reached or does not run commands for other clients — see GET /api/v1/commands.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SlashCommandRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The gateway's answer",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SlashCommandResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/v1/uploads": {
       "post": {
         "operationId": "uploadAttachment",
@@ -562,6 +595,80 @@
         }
       }
     },
+    "/api/v1/runs/{runId}": {
+      "parameters": [{ "$ref": "#/components/parameters/RunId" }],
+      "get": {
+        "operationId": "getRun",
+        "summary": "Read a run and what it is blocked on",
+        "description": "The host's own record of the run, which outlives Hermes' (a terminal run is forgotten upstream after an hour). `pending_approval` and `pending_question` are set only while the status is `waiting_for_approval`.",
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Run" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/runs/{runId}/clarify": {
+      "parameters": [{ "$ref": "#/components/parameters/RunId" }],
+      "post": {
+        "operationId": "answerClarify",
+        "summary": "Answer a question the agent asked mid-run",
+        "description": "Answers the pending `clarify.request` on this run. The host supplies the prompt id and execution generation the gateway requires. 409 when nothing is pending — already answered elsewhere, timed out, or the run moved on. Only gateways under session authority ask these.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ClarifyAnswer" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Ok" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/runs/{runId}/resolve-unknown": {
+      "parameters": [{ "$ref": "#/components/parameters/RunId" }],
+      "post": {
+        "operationId": "resolveUnknownRun",
+        "summary": "Acknowledge a run Hermes lost the owner of",
+        "description": "A run whose owner died mid-turn is neither finished nor running, and later turns in its session wait behind it. The host settles such a run as `run.failed` with `unknown: true` in the payload; this acknowledges it upstream so the chat can continue. Requires `features.run_unknown_resolution` on the gateway. 409 when Hermes does not report the run as unknown.",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "responses": {
+          "200": {
+            "description": "Resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok"],
+                  "properties": {
+                    "ok": { "type": "boolean" },
+                    "receipt": { "type": "object", "additionalProperties": true }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/v1/runs/{runId}/stop": {
       "parameters": [{ "$ref": "#/components/parameters/RunId" }],
       "post": {
@@ -574,6 +681,32 @@
           "401": { "$ref": "#/components/responses/Error" },
           "409": { "$ref": "#/components/responses/Error" },
           "502": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/v1/commands": {
+      "get": {
+        "operationId": "getCommandAvailability",
+        "summary": "Whether the gateway will run slash commands",
+        "description": "Probes the gateway's control socket on the host. `?bot=<profile>` asks for a Bot's profile. Clients should offer gateway-run commands only when `available` is true.",
+        "parameters": [
+          {
+            "name": "bot",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Availability",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CommandAvailability" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
         }
       }
     },
@@ -886,7 +1019,7 @@
         "required": ["queued", "mode", "runId", "sessionId"],
         "properties": {
           "queued": { "type": "boolean" },
-          "mode": { "enum": ["started", "steered", "queued"] },
+          "mode": { "enum": ["started", "steered", "queued"], "description": "`steered` means the text went into the run in flight: injected with steer, or — when the run is blocked on a `clarify.request` — taken as its answer (text without attachments, `prefer` not `queue`)." },
           "runId": { "type": "string" },
           "sessionId": { "type": "string" }
         }
@@ -899,11 +1032,91 @@
           "all": { "type": "boolean", "default": false }
         }
       },
+      "Run": {
+        "type": "object",
+        "required": ["run_id", "project_id", "session_id", "status", "started_at", "ended_at", "pending_approval", "pending_question"],
+        "properties": {
+          "run_id": { "type": "string" },
+          "project_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["queued", "running", "waiting_for_approval", "completed", "failed", "cancelled"] },
+          "started_at": { "type": "integer", "description": "Unix epoch milliseconds" },
+          "ended_at": { "type": ["integer", "null"] },
+          "pending_approval": {
+            "type": ["object", "null"],
+            "required": ["command", "choices"],
+            "properties": {
+              "command": { "type": ["string", "null"] },
+              "choices": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "pending_question": {
+            "type": ["object", "null"],
+            "required": ["question", "choices", "multi_select"],
+            "properties": {
+              "question": { "type": "string" },
+              "choices": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "multi_select": { "type": "boolean" }
+            }
+          }
+        }
+      },
+      "ClarifyAnswer": {
+        "type": "object",
+        "required": ["answer"],
+        "properties": {
+          "answer": { "type": "string", "minLength": 1, "description": "Free text, or one of the offered choices. For a multi-select, the JSON-encoded array of picked choices." }
+        }
+      },
+      "SlashCommandRequest": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string", "pattern": "^/[A-Za-z][A-Za-z0-9_-]*(\\s[\\s\\S]*)?$", "maxLength": 4000, "description": "The whole line, leading slash included, e.g. `/usage` or `/goal ship the release`." }
+        }
+      },
+      "SlashCommandResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "output"],
+            "properties": {
+              "type": { "const": "exec" },
+              "output": { "type": "string", "description": "Markdown, as the gateway writes it for messaging platforms." }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type", "message", "display", "notice"],
+            "properties": {
+              "type": { "const": "send" },
+              "message": { "type": "string" },
+              "display": { "type": ["string", "null"] },
+              "notice": { "type": ["string", "null"] }
+            }
+          }
+        ]
+      },
+      "CommandAvailability": {
+        "type": "object",
+        "required": ["available"],
+        "properties": {
+          "available": { "type": "boolean" },
+          "reason": { "type": "string", "description": "Why not, as a code: control_unreachable, not_ready, session_authority_unavailable, profile_mismatch, unsafe_control_peer, …" },
+          "message": { "type": "string" }
+        }
+      },
       "StreamEvent": {
         "type": "object",
         "required": ["type", "runId", "runActive", "sequence", "occurredAt", "payload"],
         "properties": {
-          "type": { "type": "string", "description": "message.delta, tool.started, tool.completed, reasoning.available, subagent.start, subagent.complete, approval.request, approval.responded, run.steered, run.stopping, run.completed, run.failed, run.cancelled, or a project event" },
+          "type": { "type": "string", "description": "message.delta, message.interim, tool.started, tool.completed, reasoning.available, subagent.start, subagent.complete, approval.request, approval.responded, clarify.request, clarify.settled, run.queued, run.steered, run.stopping, run.completed, run.failed, run.cancelled, or a project event. A gateway shutdown mid-run arrives as run.failed with `interrupted: true`; a run whose owner was lost as run.failed with `unknown: true`. Clients must ignore types they do not know." },
           "runId": { "type": ["string", "null"] },
           "runActive": { "type": ["boolean", "null"], "description": "Whether the referenced run is currently active; null for project events without a run" },
           "sequence": { "type": ["integer", "null"] },
@@ -1120,6 +1333,7 @@
             "properties": {
               "reachable": { "type": "boolean" },
               "health": { "type": ["object", "null"], "additionalProperties": true },
+              "health_detailed": { "type": ["object", "null"], "additionalProperties": true, "description": "GET /health/detailed from the gateway; null when it has no such route." },
               "capabilities": { "type": ["object", "null"], "additionalProperties": true },
               "error": { "type": ["string", "null"] }
             }

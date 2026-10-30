@@ -53,6 +53,13 @@ export interface ThreadMessage {
    * so FileLinks re-discovers them on reload and the turn looks the same.
    */
   attachments?: Attachment[];
+  /**
+   * The slash command whose output this is, run by the gateway. Local to
+   * this screen: the gateway answers the caller and writes nothing to the
+   * transcript, so a reload doesn't bring it back — as in Telegram, where a
+   * command's reply isn't part of what the agent remembers either.
+   */
+  command?: string;
 }
 
 export type ToolStatus = "running" | "completed" | "failed";
@@ -121,6 +128,18 @@ export interface PendingApproval {
   allowSession: boolean;
   /** owner override of a Smart DENY — only `once` and `deny` are offered */
   smartDenied: boolean;
+}
+
+/**
+ * A question the agent's clarify tool asked mid-run (`clarify.request`). The
+ * answer is always a string; for a multi-select it is the JSON array of the
+ * picked choices, which is how the gateway's clarify tool parses it.
+ */
+export interface PendingClarify {
+  runId: string;
+  question: string;
+  choices: string[];
+  multiSelect: boolean;
 }
 
 /**

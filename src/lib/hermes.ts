@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { promptResponseBody, type PromptRef } from "./run-events";
 
 const BASE_URL = process.env.HERMES_API_URL || "http://127.0.0.1:8642";
 const API_KEY = process.env.HERMES_API_KEY || "";
@@ -530,19 +531,56 @@ function createClient(scope: Scope) {
       );
     },
 
+    /**
+     * POST /v1/runs/{id}/approval. A gateway under session authority answers
+     * one exact prompt and rejects any other key set, so `ref` (from the
+     * request event) switches the body to `{request_id, execution_generation,
+     * choice}` and drops `all`. Without it, the legacy body.
+     */
     approveRun(
       runId: string,
       choice: "once" | "session" | "always" | "deny",
       all?: boolean,
+      ref: PromptRef | null = null,
     ) {
       return hermesFetch<void>(scope, `/v1/runs/${runId}/approval`, {
         method: "POST",
-        body: JSON.stringify({ choice, all }),
+        body: JSON.stringify(promptResponseBody(ref, "choice", choice, { all })),
+      });
+    },
+
+    /**
+     * POST /v1/runs/{id}/clarify — answer the question the agent's clarify
+     * tool asked mid-run. Session authority only; the body is always the
+     * exact `{request_id, execution_generation, answer}` set.
+     */
+    clarifyRun(runId: string, answer: string, ref: PromptRef) {
+      return hermesFetch<Record<string, unknown>>(scope, `/v1/runs/${runId}/clarify`, {
+        method: "POST",
+        body: JSON.stringify(promptResponseBody(ref, "answer", answer)),
+      });
+    },
+
+    /**
+     * POST /v1/runs/{id}/resolve-unknown — acknowledge a run whose owner was
+     * lost mid-turn. Until it is, later turns in that session wait behind it.
+     * Session authority only (`features.run_unknown_resolution`); both values
+     * come from `GET /v1/runs/{id}`.
+     */
+    resolveUnknownRun(runId: string, admissionId: string, generation: number) {
+      return hermesFetch<Record<string, unknown>>(scope, `/v1/runs/${runId}/resolve-unknown`, {
+        method: "POST",
+        body: JSON.stringify({ admission_id: admissionId, execution_generation: generation }),
       });
     },
 
     health() {
       return hermesFetch<{ status: string }>(scope, "/health");
+    },
+
+    /** GET /health/detailed — platform and runtime state behind `/health`. */
+    healthDetailed() {
+      return hermesFetch<Record<string, unknown>>(scope, "/health/detailed");
     },
 
     capabilities() {

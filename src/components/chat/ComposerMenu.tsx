@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSkillCatalogue } from "@/components/nav/SkillPicker";
 import { useProjectBot } from "@/components/ProjectBotContext";
 import {
   COMMAND_CATALOGUE,
+  GATEWAY_REASON,
   REASON_LABEL,
+  runsOnGateway,
   SLASH_COMMANDS,
   UNROUTED_REASON,
   type CommandNeed,
@@ -13,6 +15,27 @@ import {
 } from "@/lib/commands";
 import type { HermesFeatures } from "@/hooks/useStatus";
 import { IconAt, IconSlash } from "@/components/primitives/icons";
+import { botQuery } from "@/components/ProjectBotContext";
+
+/** Whether the gateway will run its slash commands for this chat's Bot —
+ *  asked once per mount; false until it answers, and on any failure. */
+export function useGatewayCommands(bot: string | null, enabled = true): boolean {
+  const [available, setAvailable] = useState(false);
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    fetch(`/api/commands${botQuery(bot)}`)
+      .then((r) => r.json())
+      .then((body: { available?: boolean }) => {
+        if (!cancelled) setAvailable(body.available === true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [bot, enabled]);
+  return enabled && available;
+}
 
 /* PromptBar's @-sources and /-commands menus, restored — the originals were
  * dropped when this composer was lifted because they were scripted demo lists.
@@ -36,6 +59,8 @@ export interface MenuItem {
   tag?: string;
   /** section heading rendered above this item */
   heading?: string;
+  /** a catalogued command the gateway runs; `takesArgs` keeps it in the box */
+  gateway?: { name: string; takesArgs: boolean };
 }
 
 /** Everything the composer needs to know about what's on screen. */
@@ -50,6 +75,7 @@ export function useMenuItems(
   features: HermesFeatures,
   running: boolean,
   has: Partial<Record<CommandNeed, boolean>> = {},
+  gateway = false,
 ): { items: MenuItem[]; commands: SlashCommand[] } {
   const skills = useSkillCatalogue(useProjectBot());
 
@@ -104,6 +130,11 @@ export function useMenuItems(
       );
     });
 
+    // With the gateway reachable, the part of the catalogue it runs moves up
+    // under its own heading and becomes selectable.
+    const onGateway = gateway ? catalogue.filter(runsOnGateway) : [];
+    const greyed = gateway ? catalogue.filter((c) => !runsOnGateway(c)) : catalogue;
+
     return {
       commands,
       items: [
@@ -113,22 +144,31 @@ export function useMenuItems(
           subtitle: c.description,
           heading: i === 0 ? "Runs here" : undefined,
         })),
-        ...catalogue.map((c, i) => ({
+        ...onGateway.map((c, i) => ({
+          key: `gateway:${c.name}`,
+          title: `${c.name}${c.args ? ` ${c.args}` : ""}`,
+          subtitle: c.description,
+          // Only a required argument (`<prompt>`) keeps it in the box; an
+          // optional one (`[days]`) runs bare, as it would in Telegram.
+          gateway: { name: c.name, takesArgs: Boolean(c.args?.startsWith("<")) },
+          heading: i === 0 ? "Runs on the gateway" : undefined,
+        })),
+        ...greyed.map((c, i) => ({
           key: `catalogue:${c.name}`,
           title: `${c.name}${c.args ? ` ${c.args}` : ""}`,
           subtitle: c.note ? `${c.description} — ${c.note}` : c.description,
           disabled: true,
-          tag: REASON_LABEL[c.reason],
+          tag: gateway ? "gateway refuses" : REASON_LABEL[c.reason],
           heading:
             i === 0
-              ? q
-                ? `In Hermes (${catalogue.length})`
+              ? q || gateway
+                ? `In Hermes, not here (${greyed.length})`
                 : `In Hermes, not here (${COMMAND_CATALOGUE.length})`
               : undefined,
         })),
       ],
     };
-  }, [mode, skills, features, running, has]);
+  }, [mode, skills, features, running, has, gateway]);
 }
 
 export function ComposerMenu({
@@ -137,12 +177,14 @@ export function ComposerMenu({
   index,
   onSelect,
   showUnroutedNote,
+  gateway = false,
 }: {
   mode: MenuMode;
   items: MenuItem[];
   index: number;
   onSelect: (item: MenuItem, at: number) => void;
   showUnroutedNote: boolean;
+  gateway?: boolean;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -225,7 +267,7 @@ export function ComposerMenu({
 
       {showUnroutedNote && (
         <p className="mx-1 mt-1 border-t border-line px-1.5 pt-2.5 pb-1.5 text-label text-ink-3">
-          {UNROUTED_REASON}
+          {gateway ? GATEWAY_REASON : UNROUTED_REASON}
         </p>
       )}
     </div>

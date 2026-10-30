@@ -8,9 +8,10 @@ export const dynamic = "force-dynamic";
 
 
 export async function GET() {
-  const [health, capabilities] = await Promise.allSettled([
+  const [health, capabilities, detailed] = await Promise.allSettled([
     hermes.health(),
     hermes.capabilities(),
+    hermes.healthDetailed(),
   ]);
 
   const activeRuns = db
@@ -29,6 +30,8 @@ export async function GET() {
       reachable: health.status === "fulfilled",
       version: hermesVersion(healthBody, capabilitiesBody),
       health: health.status === "fulfilled" ? health.value : null,
+      // Platform and runtime state; null on a gateway without the route.
+      health_detailed: detailed.status === "fulfilled" ? detailed.value : null,
       capabilities: capabilities.status === "fulfilled" ? capabilities.value : null,
       error: health.status === "rejected" ? String(health.reason) : null,
     },

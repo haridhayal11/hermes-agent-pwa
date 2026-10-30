@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useThread } from "@/hooks/useThread";
 import {
   AssistantMessage,
+  CommandMessage,
   CronMessage,
   extractQuestion,
   SystemMessage,
@@ -15,6 +16,8 @@ import { ThinkingTrace } from "@/components/chat/ThinkingTrace";
 import { ToolCallRows } from "@/components/chat/ToolCallRows";
 import { SubagentCards } from "@/components/chat/SubagentCard";
 import { ApprovalCard } from "@/components/chat/ApprovalCard";
+import { ClarifyCard } from "@/components/chat/ClarifyCard";
+import { buttonClass } from "@/components/ui/SettingsControls";
 import { QueuedRows } from "@/components/chat/QueuedRows";
 import { RunStatusLine } from "@/components/chat/RunStatusLine";
 import {
@@ -602,6 +605,9 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
         />
       );
     }
+    if (message.role === "system" && message.command) {
+      return <CommandMessage key={message.id} command={message.command} content={message.content} />;
+    }
     if (message.role === "system") {
       return <SystemMessage key={message.id} content={message.content} />;
     }
@@ -799,7 +805,24 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
         * 45vh and scrollable in its own right: an approval's command block
         * can run to dozens of lines, and pushing the composer off a 390px
         * screen would leave no way to answer in prose either. */}
-      {(approval || pinnedQuestion) && (
+      {thread.unknownRun && !approval && !thread.clarify && (
+        <div className="px-safe z-20 mx-auto w-full max-w-3xl shrink-0 pb-1">
+          <div className="flex items-center gap-3 rounded-card bg-surface p-3 pl-4 shadow-card">
+            <p className="min-w-0 flex-1 text-label text-ink-2">
+              Hermes lost track of the last run. New messages here wait behind it until it&rsquo;s resolved.
+            </p>
+            <button
+              type="button"
+              onClick={() => void thread.resolveUnknown()}
+              className={`${buttonClass("secondary", "sm")} h-8 shrink-0 px-3 text-label`}
+            >
+              Resolve
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(approval || thread.clarify || pinnedQuestion) && (
         // Selectable like the transcript: this sits outside the scroller,
         // and the approval's command is exactly what you'd want to copy.
         <div data-selectable className="px-safe z-20 mx-auto w-full max-w-3xl shrink-0 pb-1">
@@ -812,6 +835,11 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
                 onRespond={(choice, all) => void thread.respondApproval(choice, all)}
                 attention={attention}
                 onAttended={clearApprovalTarget}
+              />
+            ) : thread.clarify ? (
+              <ClarifyCard
+                clarify={thread.clarify}
+                onAnswer={(answer) => void thread.respondClarify(answer)}
               />
             ) : (
               pinnedQuestion && (
@@ -833,6 +861,7 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
         onSend={thread.send}
         onStop={stop}
         onCommand={(command, rest) => void onCommand(command, rest)}
+        onGatewayCommand={(text) => void thread.runGatewayCommand(text)}
         onUnavailable={raiseError}
         running={running}
         stopping={stopping}

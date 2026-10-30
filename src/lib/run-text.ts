@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { markdownToPlainText } from "./markdown";
+import { promptRef, type PromptRef } from "./run-events";
 
 /* Reads over a run's persisted event log. Database only — run-manager,
  * activity and push all need these, and push must not import run-manager. */
@@ -61,6 +62,8 @@ export interface PendingApprovalSummary {
   command: string | null;
   /** what the gateway will accept for this one — `choices` on the event */
   choices: string[];
+  /** set only by a gateway under session authority, which requires it back */
+  ref: PromptRef | null;
 }
 
 /** The approval a run is blocked on, from its request — null once answered. */
@@ -79,8 +82,46 @@ export function pendingApproval(runId: string): PendingApprovalSummary | null {
         choices: Array.isArray(event.choices)
           ? event.choices.filter((choice): choice is string => typeof choice === "string")
           : [],
+        ref: promptRef(event),
       };
     } else if (event.event === "approval.responded") {
+      pending = null;
+    }
+  }
+  return pending;
+}
+
+export interface PendingClarifySummary {
+  question: string;
+  /** offered answers; free text is accepted whether or not there are any */
+  choices: string[];
+  multiSelect: boolean;
+  ref: PromptRef | null;
+}
+
+/**
+ * The question a run is blocked on — the agent's clarify tool, asked
+ * mid-run. Only a gateway under session authority puts these on the run
+ * stream. Null once settled, or once the run has ended.
+ */
+export function pendingClarify(runId: string): PendingClarifySummary | null {
+  let pending: PendingClarifySummary | null = null;
+  for (const event of runEvents(runId)) {
+    if (event.event === "clarify.request") {
+      pending = {
+        question: typeof event.question === "string" ? event.question.trim() : "",
+        choices: Array.isArray(event.choices)
+          ? event.choices.filter((choice): choice is string => typeof choice === "string")
+          : [],
+        multiSelect: event.multi_select === true,
+        ref: promptRef(event),
+      };
+    } else if (
+      event.event === "clarify.settled" ||
+      event.event === "run.completed" ||
+      event.event === "run.failed" ||
+      event.event === "run.cancelled"
+    ) {
       pending = null;
     }
   }

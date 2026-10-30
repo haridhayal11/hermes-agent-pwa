@@ -6,6 +6,7 @@ import { usePreferences } from "@/components/PreferencesContext";
 import type {
   Attachment,
   PendingApproval,
+  PendingClarify,
   RunPhase,
   SubagentRun,
   ThreadMessage,
@@ -23,6 +24,12 @@ import { toThreadMessages, type RawThreadMessage } from "@/lib/thread-messages";
  *   subagent.start  subagent.complete  approval.request  approval.responded
  *   run.steered  run.stopping  run.completed  run.failed  run.cancelled
  *
+ * Newer gateways under session authority add `clarify.request` /
+ * `clarify.settled` (a question the agent's clarify tool asks mid-run),
+ * `message.interim` (commentary beside tool calls) and `run.queued`.
+ * run-manager has already rewritten `run.interrupted` to `run.failed` and
+ * `approval.settled` to `approval.responded` (lib/run-events.ts).
+ *
  * Notably absent: `run.started` and `hermes.tool.progress` — both exist only
  * on the /api/sessions/{id}/chat/stream path, and `_thinking` is explicitly
  * withheld from the run stream as "high-volume UI noise"
@@ -39,6 +46,8 @@ export interface ThreadState {
   subagents: SubagentRun[];
   phase: RunPhase;
   approval: PendingApproval | null;
+  clarify: PendingClarify | null;
+  unknownRun: string | null;
   runId: string | null;
   startedAt: number | null;
   queued: string[];
@@ -75,6 +84,20 @@ function commandText(value: unknown): string | null {
   return JSON.stringify(value, null, 2);
 }
 
+/** History, with this screen's command output woven back in by time. */
+function keepCommandOutput(history: ThreadMessage[], prev: ThreadMessage[]): ThreadMessage[] {
+  const local = prev.filter((m) => m.command);
+  if (local.length === 0) return history;
+  const merged = [...history];
+  for (const message of local) {
+    const at = message.createdAt ?? 0;
+    let index = merged.length;
+    while (index > 0 && (merged[index - 1].createdAt ?? 0) > at) index -= 1;
+    merged.splice(index, 0, message);
+  }
+  return merged;
+}
+
 export function useThread(
   projectId: string,
   sessionId: string,
@@ -88,6 +111,11 @@ export function useThread(
   const [subagents, setSubagents] = useState<SubagentRun[]>([]);
   const [phase, setPhase] = useState<RunPhase>("idle");
   const [approval, setApproval] = useState<PendingApproval | null>(null);
+  const [clarify, setClarify] = useState<PendingClarify | null>(null);
+  /* A run Hermes lost the owner of (run.failed with `unknown`). Until it is
+   * acknowledged upstream, later turns in this session wait behind it, so the
+   * thread offers to resolve it rather than just reporting the failure. */
+  const [unknownRun, setUnknownRun] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [queued, setQueued] = useState<string[]>([]);
@@ -141,7 +169,9 @@ export function useThread(
     );
     if (!res.ok) return;
     const body = (await res.json()) as { messages: RawThreadMessage[] };
-    setMessages(toThreadMessages(body.messages));
+    // Command output lives only here (see ThreadMessage.command), so it is
+    // carried across a history refresh rather than wiped by the next turn.
+    setMessages((prev) => keepCommandOutput(toThreadMessages(body.messages), prev));
   }, [projectId, sessionId]);
 
   const startNewRun = useCallback((id: string) => {
@@ -157,6 +187,8 @@ export function useThread(
     setTools([]);
     setSubagents([]);
     setApproval(null);
+    setClarify(null);
+    setUnknownRun(null);
     setErrorMessage(null);
     resetSegments();
   }, [resetSegments]);
@@ -174,6 +206,7 @@ export function useThread(
         setThinking("");
         setTools([]);
         setSubagents([]);
+        setUnknownRun(null);
         resetSegments();
         setQueued((prev) => prev.slice(1));
       }
@@ -363,6 +396,36 @@ export function useThread(
           setPhase((current) => (current === "stopping" ? current : "running"));
           break;
         }
+        /* The agent's clarify tool, asked mid-run. It blocks the run the way
+         * an approval does, so it shares the phase; the answer is free text,
+         * with `choices` offered as shortcuts. */
+        case "clarify.request": {
+          setPhase("waiting_for_approval");
+          setClarify({
+            runId: evt.run_id,
+            question: str(evt.question) ?? "",
+            choices: Array.isArray(evt.choices)
+              ? (evt.choices as unknown[]).filter((c): c is string => typeof c === "string")
+              : [],
+            multiSelect: evt.multi_select === true,
+          });
+          break;
+        }
+        case "clarify.settled": {
+          setClarify(null);
+          setPhase((current) => (current === "stopping" ? current : "running"));
+          break;
+        }
+        /* Commentary the model wrote beside its tool calls. When it was
+         * already streamed as message.delta the reasoning.available boundary
+         * handles it; when it wasn't, this is its only appearance, and it
+         * belongs with the narration rather than the answer. */
+        case "message.interim": {
+          const text = str(evt.text)?.trim();
+          if (!text || evt.already_streamed === true) break;
+          setThinking((prev) => (prev ? `${prev}\n\n${text}` : text));
+          break;
+        }
         /* A mid-run message reached the agent. On the device that sent it the
          * optimistic user message is already on screen; on any other device —
          * or on this one after a reconnect replay — this event is the only
@@ -469,6 +532,7 @@ export function useThread(
           // 429 or a bad model id reads as "Run failed" otherwise, and the
           // one thing the user can act on is exactly that string.
           if (kind === "run.failed") setError(str(evt.error) ?? "Run failed");
+          if (kind === "run.failed" && evt.unknown === true && evt.run_id) setUnknownRun(evt.run_id);
           if (kind === "run.cancelled") setError("Stopped");
           // The last segment was never followed by a tool call, so it was the
           // answer, not narration. Drop the boundary and leave the text alone.
@@ -482,6 +546,7 @@ export function useThread(
           setThinking("");
           setSubagents([]);
           setApproval(null);
+          setClarify(null);
           setStartedAt(null);
           void refreshMessages();
           break;
@@ -495,6 +560,104 @@ export function useThread(
 
   const { reconnect } = useRunStream(projectId, sessionId, onEvent);
 
+  const resolveUnknown = useCallback(async () => {
+    if (!unknownRun) return;
+    const res = await fetch(`/api/runs/${unknownRun}/resolve-unknown`, { method: "POST" }).catch(
+      () => null,
+    );
+    if (!res) {
+      setError("Network unreachable");
+      return;
+    }
+    // 409: Hermes no longer reports it as unknown — resolved elsewhere, or
+    // it settled on its own. Either way there is nothing left to do here.
+    if (res.ok || res.status === 409 || res.status === 404) {
+      setUnknownRun(null);
+      setErrorMessage(null);
+      return;
+    }
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    setError(body.error ?? "Couldn't resolve the run");
+  }, [unknownRun, setError]);
+
+  /* Answering a clarify is optimistic like an approval: the card goes at
+   * once and comes back if the answer didn't land. A 409 means it was
+   * answered elsewhere (another device, or it timed out), so the card stays
+   * gone and clarify.settled is on its way. */
+  const respondClarify = useCallback(
+    async (answer: string) => {
+      if (!clarify) return;
+      const pending = clarify;
+      setClarify(null);
+      setPhase("running");
+      let res: Response;
+      try {
+        res = await fetch(`/api/runs/${pending.runId}/clarify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answer }),
+        });
+      } catch {
+        setClarify(pending);
+        setPhase("waiting_for_approval");
+        setError("Network unreachable");
+        return;
+      }
+      if (!res.ok && res.status !== 409) {
+        setClarify(pending);
+        setPhase("waiting_for_approval");
+        setError("Answer failed to reach Hermes");
+      }
+    },
+    [clarify, setError],
+  );
+
+  /* A Hermes slash command, run by the gateway against this session
+   * (lib/hermes-gateway.ts). Its output lands as a local message; one that
+   * rewrites itself into a prompt (/plan, /learn, …) is sent as that prompt,
+   * through the ordinary path so it queues and streams like anything else. */
+  const runGatewayCommand = useCallback(
+    async (command: string): Promise<string | null> => {
+      setErrorMessage(null);
+      let res: Response;
+      try {
+        res = await fetch(`/api/projects/${projectId}/sessions/${sessionId}/command`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command }),
+        });
+      } catch {
+        setError("Network unreachable");
+        return null;
+      }
+      const body = (await res.json().catch(() => ({}))) as {
+        type?: "exec" | "send";
+        output?: string;
+        message?: string;
+        notice?: string | null;
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(body.error ?? `${command.split(/\s/)[0]} failed (${res.status})`);
+        return null;
+      }
+      if (body.type === "send" && body.message) return body.message;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `command_${Date.now()}`,
+          role: "system",
+          content: body.output?.trim() || "Done.",
+          contentFormat: "markdown",
+          command,
+          createdAt: Date.now(),
+        },
+      ]);
+      return null;
+    },
+    [projectId, sessionId, setError],
+  );
+
   const send = useCallback(
     async (
       text: string,
@@ -503,6 +666,12 @@ export function useThread(
     ) => {
       const trimmed = text.trim();
       if (!trimmed && attachments.length === 0) return;
+      // A run blocked on a question takes the next thing typed as its
+      // answer — queueing it behind a run that can't move would deadlock.
+      if (clarify && trimmed && attachments.length === 0 && !prefer) {
+        await respondClarify(trimmed);
+        return;
+      }
       setErrorMessage(null);
       setMessages((prev) => [
         ...prev,
@@ -557,7 +726,7 @@ export function useThread(
       // connection so it binds to the new run id.
       reconnect();
     },
-    [projectId, sessionId, reconnect, setError, startNewRun],
+    [projectId, sessionId, reconnect, setError, startNewRun, clarify, respondClarify],
   );
 
   const stop = useCallback(async () => {
@@ -605,7 +774,8 @@ export function useThread(
         setError("Network unreachable");
         return;
       }
-      if (!res.ok) {
+      // 409: answered elsewhere; approval.responded is on its way.
+      if (!res.ok && res.status !== 409) {
         // Put the card back. The run is still blocked upstream, and a thread
         // that looks like it resumed but hasn't is the worse failure.
         setApproval(pending);
@@ -624,6 +794,8 @@ export function useThread(
     subagents,
     phase,
     approval,
+    clarify,
+    unknownRun,
     runId,
     startedAt,
     queued,
@@ -637,6 +809,12 @@ export function useThread(
     stop,
     retry,
     respondApproval,
+    respondClarify,
+    resolveUnknown,
+    runGatewayCommand: async (command: string) => {
+      const prompt = await runGatewayCommand(command);
+      if (prompt) await send(prompt);
+    },
     /** for the shell's own failures — a command that didn't land, say */
     raiseError: setError,
     dismissError: () => setErrorMessage(null),

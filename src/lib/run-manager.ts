@@ -18,7 +18,14 @@ import { outboxDirFor } from "./uploads";
 import type { Attachment } from "./chat-types";
 import { sendToAll, type PushKind } from "./push";
 import { autoNameSession, getProjectSession } from "./project-sessions";
-import { pendingApprovalCommand, replyPreview, runText } from "./run-text";
+import {
+  pendingApproval,
+  pendingApprovalCommand,
+  pendingClarify,
+  replyPreview,
+  runText,
+} from "./run-text";
+import { normalizeUpstreamEvent } from "./run-events";
 import { extractQuestion } from "./recommendation";
 import { publishActivity } from "./api-changes";
 
@@ -236,6 +243,14 @@ const globalForRunManager = globalThis as unknown as {
   __hermesPwaRunManager?: RunManager;
 };
 
+/** Nothing to answer: the prompt was settled elsewhere, or never existed. */
+export class PromptNotPendingError extends Error {
+  constructor(runId: string) {
+    super(`Run ${runId} is not waiting on that`);
+    this.name = "PromptNotPendingError";
+  }
+}
+
 class RunManager extends EventEmitter {
   /** runId -> pending approval nag, cleared when the approval is answered. */
   private approvalNags = new Map<string, ReturnType<typeof setTimeout>>();
@@ -378,6 +393,23 @@ class RunManager extends EventEmitter {
     if (!active) {
       const runId = await this.startRun(projectId, text, attachments, sessionId);
       return { queued: false, mode: "started", runId };
+    }
+
+    // A run blocked on its clarify tool can't take a steer and won't reach
+    // the queue, so text sent to it is the answer — the same rule the web
+    // composer applies, here so every client gets it. Reported as `steered`:
+    // the text went into the run in flight, which is what that mode means.
+    if (opts.prefer !== "queue" && attachments.length === 0 && text.trim()) {
+      const question = pendingClarify(active.run_id);
+      if (question?.ref) {
+        try {
+          await this.answerClarify(active.run_id, text.trim());
+          return { queued: false, mode: "steered", runId: active.run_id };
+        } catch (err) {
+          // Answered elsewhere a moment ago: fall through to steer/queue.
+          if (!(err instanceof HermesApiError) && !(err instanceof PromptNotPendingError)) throw err;
+        }
+      }
     }
 
     // Steer carries text only — there is no attachment form — so anything
@@ -539,13 +571,25 @@ class RunManager extends EventEmitter {
     // re-checks it, and the badge a push carries is counted from it.
     if (event.event === "approval.request") {
       this.setStatus(runId, "waiting_for_approval");
-      if (this.hasSubscribers(runId)) this.armApprovalNag(runId);
+      if (this.hasSubscribers(runId)) this.armApprovalNag(runId, "approval");
       else void this.notify(runId, "approval");
     }
-    if (event.event === "approval.responded") this.setStatus(runId, "running");
+    // A mid-run clarify blocks the run exactly as an approval does, so it
+    // shares the status (the one every client already reads as "waiting on
+    // you") and the nag. It is announced as the question it is.
+    if (event.event === "clarify.request") {
+      this.setStatus(runId, "waiting_for_approval");
+      const question = typeof event.question === "string" ? event.question.trim() : "";
+      if (this.hasSubscribers(runId)) this.armApprovalNag(runId, "question", question);
+      else void this.notify(runId, "question", undefined, question);
+    }
+    if (event.event === "approval.responded" || event.event === "clarify.settled") {
+      this.setStatus(runId, "running");
+    }
     // Answered, or the run moved on without one — either way stop nagging.
     if (
       event.event === "approval.responded" ||
+      event.event === "clarify.settled" ||
       (typeof event.event === "string" && TERMINAL_EVENTS.has(event.event))
     ) {
       this.clearApprovalNag(runId);
@@ -600,13 +644,13 @@ class RunManager extends EventEmitter {
    * outstanding, and never re-arms — a second buzz for the same decision is
    * nagging, not notifying.
    */
-  private armApprovalNag(runId: string) {
+  private armApprovalNag(runId: string, kind: "approval" | "question", detail?: string) {
     if (this.approvalNags.has(runId)) return;
     const timer = setTimeout(() => {
       this.approvalNags.delete(runId);
       const run = this.getRun(runId);
       if (!run || run.status !== "waiting_for_approval") return;
-      void this.notify(runId, "approval");
+      void this.notify(runId, kind, undefined, detail);
     }, APPROVAL_NAG_MS);
     // Node keeps the process alive for a pending timer; a run's approval must
     // never be the reason the server refuses to shut down.
@@ -797,6 +841,7 @@ class RunManager extends EventEmitter {
             } catch {
               continue;
             }
+            parsed = normalizeUpstreamEvent(parsed);
             this.appendEvent(runId, parsed);
             if (typeof parsed.event === "string" && TERMINAL_EVENTS.has(parsed.event)) {
               closedByTerminalEvent = true;
@@ -846,6 +891,21 @@ class RunManager extends EventEmitter {
     }
 
     const status = await this.pollUntilSettled(runId);
+    if (status === "unknown") {
+      // Under session authority a run whose owner died is neither finished
+      // nor running, and later turns in its session wait behind it until a
+      // client acknowledges it (resolveUnknown). Settle it here as failed —
+      // the outcome genuinely is not known — and say what unblocks the chat.
+      this.appendEvent(runId, {
+        event: "run.failed",
+        run_id: runId,
+        synthesized: true,
+        unknown: true,
+        error: "Hermes lost track of this run. Resolve it to let the chat continue.",
+      });
+      this.finishRun(runId, "failed");
+      return;
+    }
     if (status) {
       // Synthesised, not received: subscribers replaying from run_events must
       // see the run end even though Hermes never got the chance to say so.
@@ -883,6 +943,9 @@ class RunManager extends EventEmitter {
         const run = await this.clientForRun(runId).getRun(runId);
         consecutiveErrors = 0;
         if (TERMINAL_STATUSES.has(run.status)) return run.status;
+        // A gateway shutdown mid-run; "unknown" is a lost owner (see attach).
+        if (run.status === "interrupted") return "failed";
+        if (run.status === "unknown") return "unknown";
       } catch (err) {
         // The run id is gone from Hermes' registry — nothing left to wait for.
         const status = (err as { status?: number }).status;
@@ -919,7 +982,38 @@ class RunManager extends EventEmitter {
     choice: "once" | "session" | "always" | "deny",
     all?: boolean,
   ) {
-    await this.clientForRun(runId).approveRun(runId, choice, all);
+    // A gateway under session authority answers one exact prompt, named by
+    // the request event; an older one takes the bare choice.
+    const ref = pendingApproval(runId)?.ref ?? null;
+    await this.clientForRun(runId).approveRun(runId, choice, all, ref);
+  }
+
+  /**
+   * Answers the question a run's clarify tool is blocked on. Throws
+   * `PromptNotPendingError` when there is none to answer — already answered
+   * on another device, or the run has moved on.
+   */
+  async answerClarify(runId: string, answer: string) {
+    const pending = pendingClarify(runId);
+    if (!pending?.ref) throw new PromptNotPendingError(runId);
+    return this.clientForRun(runId).clarifyRun(runId, answer, pending.ref);
+  }
+
+  /**
+   * Acknowledges a run Hermes lost the owner of, so the turns queued behind
+   * it in that session can proceed. The admission and generation are read
+   * from Hermes, never trusted from a caller.
+   */
+  async resolveUnknown(runId: string) {
+    const client = this.clientForRun(runId);
+    const run = await client.getRun(runId);
+    if (run.status !== "unknown") throw new PromptNotPendingError(runId);
+    const admissionId = run.admission_id;
+    const generation = run.execution_generation;
+    if (typeof admissionId !== "string" || typeof generation !== "number") {
+      throw new PromptNotPendingError(runId);
+    }
+    return client.resolveUnknownRun(runId, admissionId, generation);
   }
 
   /**

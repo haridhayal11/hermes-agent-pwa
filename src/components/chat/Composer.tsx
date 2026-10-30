@@ -16,15 +16,18 @@ import {
 } from "@/components/primitives/icons";
 import {
   ComposerMenu,
+  useGatewayCommands,
   useMenuItems,
   type MenuMode,
 } from "./ComposerMenu";
+import { useProjectBot } from "@/components/ProjectBotContext";
 import {
   commandQuery,
   findCatalogued,
   mentionQuery,
   parseCommand,
   REASON_LABEL,
+  runsOnGateway,
   type CommandNeed,
   type SlashCommand,
 } from "@/lib/commands";
@@ -74,6 +77,7 @@ export function Composer({
   onSend,
   onStop,
   onCommand,
+  onGatewayCommand,
   onUnavailable,
   running,
   stopping = false,
@@ -104,6 +108,8 @@ export function Composer({
   onStop: () => void;
   /** a `/` command the thread has to carry out; `rest` is the rest of the line */
   onCommand: (command: SlashCommand, rest: string) => void;
+  /** a Hermes command the gateway runs; omit where there is no session to run it in */
+  onGatewayCommand?: (text: string) => void;
   /** a real Hermes command that can't run here — say so instead of sending it */
   onUnavailable: (message: string) => void;
   running: boolean;
@@ -201,7 +207,9 @@ export function Composer({
 
   useShortcuts([{ key: "/", mod: true, run: () => inputRef.current?.focus() }]);
 
-  const { items: menuItems } = useMenuItems(menu, features, running, commandContext);
+  const bot = useProjectBot();
+  const gateway = useGatewayCommands(bot, Boolean(onGatewayCommand) && commandsEnabled);
+  const { items: menuItems } = useMenuItems(menu, features, running, commandContext, gateway);
   // Arrow keys skip the unrouted rows; they're listed, not offered.
   const firstSelectable = menuItems.findIndex((i) => !i.disabled);
   const menuOpen = menu !== null && menuItems.length > 0;
@@ -285,6 +293,12 @@ export function Composer({
        * user discover it from a confused reply. */
       const word = /^\/([a-z_-]+)/i.exec(text)?.[1];
       const catalogued = word ? findCatalogued(word) : undefined;
+      // 2a. Unless the gateway runs it: then it goes there, whole line.
+      if (catalogued && gateway && runsOnGateway(catalogued) && onGatewayCommand) {
+        onGatewayCommand(text);
+        clear();
+        return;
+      }
       if (catalogued) {
         onUnavailable(
           `${catalogued.name} is a Hermes command (${REASON_LABEL[catalogued.reason]})${
@@ -338,6 +352,23 @@ export function Composer({
       return;
     }
 
+    if (item.gateway) {
+      if (item.gateway.takesArgs) {
+        const next = `${item.gateway.name} `;
+        setDraft(next);
+        setMenu(null);
+        requestAnimationFrame(() => {
+          el?.focus();
+          el?.setSelectionRange(next.length, next.length);
+        });
+        return;
+      }
+      setMenu(null);
+      onGatewayCommand?.(item.gateway.name);
+      clear();
+      return;
+    }
+
     // Commands that take an argument stay in the box so it can be typed;
     // the rest fire immediately.
     const name = item.key;
@@ -383,6 +414,7 @@ export function Composer({
             index={menuIndex}
             onSelect={(_item, at) => applyMenuItem(at)}
             showUnroutedNote={menuItems.some((i) => i.disabled)}
+            gateway={gateway}
           />
         )}
 

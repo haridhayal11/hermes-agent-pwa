@@ -4,7 +4,7 @@ import { db } from "./db";
 import { generalChat } from "./general-chat";
 import { markdownToPlainText } from "./markdown";
 import { extractQuestion } from "./recommendation";
-import { pendingApproval } from "./run-text";
+import { pendingApproval, pendingClarify } from "./run-text";
 
 /* What is happening across every project: the notifications panel, the
  * sidebar's dots and the app badge. Database only — push.ts counts the badge
@@ -38,6 +38,10 @@ export interface NotificationItem {
   choices?: string[];
   /** an open question's card, answerable from the panel */
   question?: Recommendation;
+  /** the question is a run's mid-run clarify: it is answered at
+   *  `/api/runs/{runId}/clarify`, never as a chat message, which would only
+   *  queue behind the run it is meant to unblock */
+  clarify?: boolean;
 }
 
 const FEED_DAYS = 14;
@@ -171,6 +175,31 @@ export function buildFeed(now = Date.now()): NotificationItem[] {
   const feed: NotificationItem[] = [];
 
   for (const run of approvalRuns()) {
+    // waiting_for_approval covers a mid-run clarify too: same block, but it
+    // is a question, and reads as one.
+    const clarify = pendingClarify(run.run_id);
+    if (clarify) {
+      feed.push({
+        id: `run:${run.run_id}`,
+        kind: "question",
+        ...where(run),
+        at: run.started_at,
+        title: clarify.question || "A question needs answering",
+        body: "",
+        unread: true,
+        runId: run.run_id,
+        clarify: true,
+        // A multi-select has no single-tap answer; opening the chat does it.
+        question: {
+          kind: "question",
+          title: clarify.question,
+          actions: clarify.multiSelect
+            ? []
+            : clarify.choices.map((choice) => ({ label: choice, reply: choice })),
+        },
+      });
+      continue;
+    }
     const pending = pendingApproval(run.run_id);
     feed.push({
       id: `run:${run.run_id}`,

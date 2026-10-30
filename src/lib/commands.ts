@@ -16,6 +16,12 @@
  * model as literal text. There is no endpoint serving the catalogue either —
  * it lives in the CLI process, not the API server.
  *
+ * A gateway under session authority does run many of them for its own
+ * clients, over `slash.exec` on its `/api/ws` socket, and lib/hermes-gateway.ts
+ * goes there for them. That set is the gateway's allowlist, not this menu:
+ * GATEWAY_COMMANDS mirrors it, and a catalogued command in it runs when
+ * `/api/commands` says the gateway will take it.
+ *
  * So this file is two things:
  *
  *   1. DISPATCH — the commands this app carries out itself, each mapped to an
@@ -332,6 +338,32 @@ export const COMMAND_CATALOGUE: CatalogueCommand[] = [
   { name: "/debug", args: "[nous|local]", description: "Upload debug report (system info + logs) and get shareable links", category: "Info", reason: "no-api" },
 ];
 
+/**
+ * What a gateway under session authority runs through `slash.exec` —
+ * gateway/session_commands.py at bf0203a794a (_READ_COMMANDS,
+ * _CONTROL_COMMANDS, _HANDLER_CONTROLS, _PROMPT_COMMANDS, _SETTING_COMMANDS,
+ * _INFO_READS). Some take only certain arguments there (`/usage` without
+ * `reset`, the read forms of `/memory` and `/kanban`); the gateway refuses
+ * the rest itself, with a reason that is shown as-is.
+ *
+ * Deliberately absent, because the gateway refuses them to every client:
+ * /restart, /compress, /undo, /rollback, /pause, /background, /update,
+ * /platform, /reload-mcp, /reload-skills, /sethome, /topic, /start, /agents.
+ */
+export const GATEWAY_COMMANDS = new Set([
+  "help", "commands", "status", "context", "version", "whoami", "usage", "insights", "profile",
+  "diff", "memory", "kanban", "topup", "suggestions", "bundles", "skills", "title",
+  "goal", "subgoal", "loop", "heartbeat", "review", "refine", "debug", "curator", "login", "autoprune",
+  "plan", "learn", "init", "moa", "blueprint", "egress",
+  "reasoning", "voice", "approvals", "codex-runtime", "footer", "busy", "verbose", "yolo", "fast", "personality",
+  "toolsets", "platforms",
+]);
+
+/** True when the gateway will run this catalogued command (if it is reachable). */
+export function runsOnGateway(command: CatalogueCommand): boolean {
+  return GATEWAY_COMMANDS.has(command.name.slice(1));
+}
+
 export const REASON_LABEL: Record<CatalogueReason, string> = {
   "no-api": "no endpoint",
   unbuilt: "not wired up",
@@ -339,6 +371,10 @@ export const REASON_LABEL: Record<CatalogueReason, string> = {
 
 export const UNROUTED_REASON =
   "This is the menu Hermes gives Telegram — its whole gateway command set — and :8642 routes none of it: api_server never imports the gateway's slash handler, and no endpoint serves the catalogue. The greyed entries are listed with what stands in for them here.";
+
+/** The note when the gateway is reachable and runs part of the menu. */
+export const GATEWAY_REASON =
+  "Commands under “Runs on the gateway” are carried out by Hermes itself, against this chat's session, and their output appears in the thread. The greyed ones are refused by the gateway to every client that isn't a messaging platform or the CLI.";
 
 export interface ParsedCommand {
   command: SlashCommand;

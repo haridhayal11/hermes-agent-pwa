@@ -489,6 +489,26 @@ export function CronMessage({
   );
 }
 
+/**
+ * What a slash command answered, run by the gateway (`slash.exec`). Headed
+ * with the command, since nobody typed a message that produced it, and
+ * rendered as the gateway's own Markdown — its replies are written for
+ * Telegram, which renders the same subset.
+ */
+export function CommandMessage({ command, content }: { command: string; content: string }) {
+  return (
+    <div
+      className="group/msg flex w-full flex-col gap-1.5"
+      style={{ animation: "fade-up var(--duration-slow) var(--ease-out-strong) both" }}
+    >
+      <div className="font-mono text-label font-semibold text-ink-2">{command}</div>
+      <div className="rounded-card bg-inset px-3.5 py-3 shadow-hairline">
+        <MessageBody content={content} markdown />
+      </div>
+    </div>
+  );
+}
+
 export function SystemMessage({ content }: { content: string }) {
   return (
     <p
