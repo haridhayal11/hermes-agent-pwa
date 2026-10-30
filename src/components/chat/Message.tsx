@@ -2,11 +2,19 @@
 
 import { CodeBlock } from "./CodeBlock";
 import { FileLinks } from "./FileLinks";
-import { parseRecommendation, RecommendationCard } from "./RecommendationCard";
+import { RecommendationCard } from "./RecommendationCard";
+import {
+  extractQuestion,
+  parseRecommendation,
+  questionAt,
+  splitFences,
+} from "@/lib/recommendation";
+
+export { extractQuestion, splitFences };
 import { IconCheck, IconFile } from "@/components/primitives/icons";
 import { parseBlocks, type Block, type ListBlock } from "@/lib/markdown-blocks";
 import { RECOMMEND_FENCE } from "@/lib/chat-types";
-import type { Attachment, CronMeta, Recommendation } from "@/lib/chat-types";
+import type { Attachment, CronMeta } from "@/lib/chat-types";
 import { useAgentName } from "@/components/AgentNameContext";
 
 /* Message shapes follow ChatComposer's visual spec rather than its code —
@@ -15,59 +23,6 @@ import { useAgentName } from "@/components/AgentNameContext";
  * 85% opacity — still fully readable, since that is when the reader decides
  * the approval it is waiting on. */
 
-type Segment =
-  | { kind: "text"; value: string }
-  | { kind: "code"; value: string; language?: string };
-
-/** Splits ``` fences out of assistant text. Everything else stays literal —
- * no markdown renderer, so agent output can't inject markup. */
-export function splitFences(content: string): Segment[] {
-  const segments: Segment[] = [];
-  const fence = /```([\w+-]*)\n?([\s\S]*?)(?:```|$)/g;
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = fence.exec(content)) !== null) {
-    if (match.index > cursor) {
-      segments.push({ kind: "text", value: content.slice(cursor, match.index) });
-    }
-    segments.push({ kind: "code", value: match[2], language: match[1] || undefined });
-    cursor = fence.lastIndex;
-  }
-  if (cursor < content.length) {
-    segments.push({ kind: "text", value: content.slice(cursor) });
-  }
-  return segments.filter((s) => s.kind === "code" || s.value.trim().length > 0);
-}
-
-/**
- * Which segment carries the answerable question, or -1.
- *
- * A `kind: "question"` card is the run handing the decision back — the same
- * thing an approval is, minus the security gate — so the thread hoists it out
- * of the transcript and pins it above the composer. A `kind: "recommendation"`
- * card is commentary and stays where it was written. The *last* question wins:
- * an agent that asks twice in a turn is asking about the second thing, and the
- * earlier card stays inline as the record of a question already overtaken.
- */
-function questionAt(segments: Segment[]): number {
-  let index = -1;
-  segments.forEach((segment, i) => {
-    if (segment.kind !== "code" || segment.language !== RECOMMEND_FENCE) return;
-    const parsed = parseRecommendation(segment.value);
-    if (parsed && parsed.kind === "question" && parsed.actions.length > 0) index = i;
-  });
-  return index;
-}
-
-/** The question a turn ends on, for the thread's pinned decision slot. */
-export function extractQuestion(content: string): Recommendation | null {
-  const segments = splitFences(content);
-  const at = questionAt(segments);
-  if (at === -1) return null;
-  const segment = segments[at];
-  return segment.kind === "code" ? parseRecommendation(segment.value) : null;
-}
 
 /* Inline Markdown for generated text declared as `content_format: markdown`.
  *
@@ -485,19 +440,27 @@ export function AssistantMessage({
  * agent said, in this project, unprompted. The only difference is the header, which
  * has to say so, since nobody typed the message that produced it.
  *
- * The body goes through MessageBody with its declared Markdown resolved. No
- * recommendation handling: an unattended job has nobody to ask.
+ * The body goes through MessageBody with its declared Markdown resolved. A
+ * job runs unattended, but it can still end on a decision — the reader just
+ * answers it later — so its question card is live while it is the newest
+ * thing in the chat, exactly like an assistant turn's.
  */
 export function CronMessage({
   content,
   meta,
   markdown,
   footer,
+  hoistQuestions = false,
+  onRecommendationAction,
 }: {
   content: string;
   meta: CronMeta;
   markdown: boolean;
   footer?: React.ReactNode;
+  /** the thread pins this report's question above the composer */
+  hoistQuestions?: boolean;
+  /** only for the newest message — older cards render inert */
+  onRecommendationAction?: (reply: string) => void;
 }) {
   return (
     <div
@@ -509,7 +472,12 @@ export function CronMessage({
         {meta.status === "failed" ? <span className="text-red"> · failed</span> : ""}
       </div>
       <div className="flex flex-col gap-4">
-        <MessageBody content={content} markdown={markdown} />
+        <MessageBody
+          content={content}
+          markdown={markdown}
+          hoistQuestions={hoistQuestions}
+          onRecommendationAction={onRecommendationAction}
+        />
         {/* Same path probe as any other turn. A job that wrote outside the
           * outbox, the upload cache or a project cwd renders as plain text —
           * the allowlist is the security model, and a scheduled prompt naming

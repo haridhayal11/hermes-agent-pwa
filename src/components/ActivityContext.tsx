@@ -13,8 +13,8 @@ import {
 import type { Activity, ActivityItem, ActivityState } from "@/lib/activity";
 import { showAppBadge } from "@/lib/app-badge";
 
-/* What is happening across every project: live runs, approvals, replies
- * nobody has opened, unread reports. Mounted in the root layout so it survives
+/* What is happening across every project: the notifications feed, and the
+ * per-chat states the sidebar draws as dots. Mounted in the root layout so it survives
  * navigation — AppShell is per page and remounts on every route change.
  *
  * It refetches rather than patching itself from events. The snapshot is one
@@ -39,7 +39,13 @@ const EMPTY: ActivityValue = {
 
 const Context = createContext<ActivityValue>(EMPTY);
 
-const RANK: Record<ActivityState, number> = { approval: 0, running: 1, failed: 2, unseen: 3 };
+const RANK: Record<ActivityState, number> = {
+  approval: 0,
+  question: 1,
+  running: 2,
+  failed: 3,
+  unseen: 4,
+};
 
 export function ActivityProvider({ children }: { children: ReactNode }) {
   const [activity, setActivity] = useState<Activity | null>(null);

@@ -298,15 +298,16 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const approvalTarget = searchParams.get("approval");
-  const { activity, bySession } = useActivity();
+  const { activity } = useActivity();
   // The history API, not router.replace: the latter re-renders the server
   // page, which refetches the whole transcript to drop a query string.
   const clearApprovalTarget = useCallback(() => {
     window.history.replaceState(window.history.state, "", pathname);
   }, [pathname]);
   const attention = Boolean(approvalTarget && approval?.runId === approvalTarget);
-  const live = bySession.get(session.session_id);
-  const stillWaiting = live?.state === "approval" && live.runId === approvalTarget;
+  const stillWaiting = Boolean(
+    activity?.feed.some((item) => item.kind === "approval" && item.runId === approvalTarget),
+  );
   const staleApproval = Boolean(approvalTarget && !attention && activity && !stillWaiting);
   useEffect(() => {
     if (!staleApproval) return;
@@ -537,8 +538,12 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
    * agent wrote last, with the Retry row sitting between them and the input.
    * An approval outranks a question: it's a live run holding a lock. */
   const lastMessage = messages[messages.length - 1];
+  // A scheduled report can end on a decision too — the brief asking which
+  // card to use — and in General that is most of what needs answering.
   const pinnedQuestion =
-    !approval && !running && lastMessage?.role === "assistant"
+    !approval &&
+    !running &&
+    (lastMessage?.role === "assistant" || lastMessage?.role === "cron")
       ? extractQuestion(lastMessage.content)
       : null;
 
@@ -607,6 +612,10 @@ function ChatThreadBody({ project, session, initialMessages }: ChatThreadProps) 
           content={message.content}
           meta={message.cron}
           markdown={message.contentFormat === "markdown"}
+          hoistQuestions={isLast && pinnedQuestion !== null}
+          onRecommendationAction={
+            !running && isLast ? (reply) => void thread.send(reply) : undefined
+          }
           footer={<MessageActions content={message.content} createdAt={message.createdAt} />}
         />
       );

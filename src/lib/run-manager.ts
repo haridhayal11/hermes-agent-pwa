@@ -15,10 +15,11 @@ import type { CronDelivery } from "./cron-watcher";
 import { mergeProjectMessages } from "./message-normalization";
 import { composeInstructions, parseSkills } from "./instructions";
 import { outboxDirFor } from "./uploads";
-import { RECOMMEND_FENCE, type Attachment } from "./chat-types";
+import type { Attachment } from "./chat-types";
 import { sendToAll, type PushKind } from "./push";
 import { autoNameSession, getProjectSession } from "./project-sessions";
 import { pendingApprovalCommand, replyPreview, runText } from "./run-text";
+import { extractQuestion } from "./recommendation";
 import { publishActivity } from "./api-changes";
 
 // api_server.py's /v1/runs event vocabulary (gateway/platforms/api_server.py,
@@ -620,35 +621,6 @@ class RunManager extends EventEmitter {
     this.approvalNags.delete(runId);
   }
 
-  /**
-   * The recommendation card the run ended on, if it ended on one.
-   *
-   * A run that stops to ask something is `run.completed` like any other, so
-   * "Finished." is exactly the wrong thing to say about it — the thread is
-   * waiting on the reader and the notification is the only thing that can tell
-   * them.
-   */
-  private pendingQuestion(runId: string): string | null {
-    const text = runText(runId);
-    if (!text.includes(RECOMMEND_FENCE)) return null;
-
-    // Last fence wins: the agent may quote the format before using it.
-    const fences = [
-      ...text.matchAll(new RegExp("```" + RECOMMEND_FENCE + "\\s*([\\s\\S]*?)```", "g")),
-    ];
-    const last = fences[fences.length - 1];
-    if (!last) return null;
-    try {
-      const card = JSON.parse(last[1]) as { kind?: string; title?: string };
-      if (card.kind !== "question") return null;
-      return typeof card.title === "string" && card.title.trim()
-        ? card.title.trim()
-        : "Waiting on your answer.";
-    } catch {
-      return null;
-    }
-  }
-
   /** True while at least one browser is attached to this run's stream. */
   private hasSubscribers(runId: string): boolean {
     return this.listenerCount(runId) > 0;
@@ -716,10 +688,21 @@ class RunManager extends EventEmitter {
     // seen in the thread (see markSessionSeen).
     // COALESCE: a thread that watched the terminal event arrive may already
     // have said so (markSessionSeen with this run id) before this row settles.
+    // The reply and any question it ends on outlive the event log (pruned
+    // after a day), because the notifications panel looks back two weeks.
+    const question = status === "completed" ? extractQuestion(runText(runId)) : null;
     db.prepare(
-      `UPDATE runs SET status = ?, ended_at = ?, seen_at = COALESCE(seen_at, ?)
+      `UPDATE runs SET status = ?, ended_at = ?, seen_at = COALESCE(seen_at, ?),
+                       reply_preview = ?, question_json = ?
         WHERE run_id = ?`,
-    ).run(status, endedAt, status === "cancelled" ? endedAt : null, runId);
+    ).run(
+      status,
+      endedAt,
+      status === "cancelled" ? endedAt : null,
+      status === "completed" ? replyPreview(runId) || null : null,
+      question ? JSON.stringify(question) : null,
+      runId,
+    );
     // Only synthesize a close event when there's no real terminal event to
     // tell subscribers the run is over (our attach() loop ending abnormally
     // without ever seeing run.completed/failed/cancelled from Hermes).
@@ -738,8 +721,7 @@ class RunManager extends EventEmitter {
     }
 
     if (!watched || Date.now() - started > NOTIFY_AFTER_MS) {
-      const question = status === "completed" ? this.pendingQuestion(runId) : null;
-      if (question) void this.notify(runId, "question", status, question);
+      if (question) void this.notify(runId, "question", status, question.title);
       else void this.notify(runId, "run", status);
     }
 

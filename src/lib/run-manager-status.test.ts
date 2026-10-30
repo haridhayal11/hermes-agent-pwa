@@ -20,6 +20,7 @@ vi.mock("./hermes", () => ({
 
 type Internals = {
   appendEvent: (runId: string, event: Record<string, unknown>) => number;
+  finishRun: (runId: string, status: string) => void;
 };
 
 let db: typeof import("./db").db;
@@ -101,6 +102,22 @@ describe("run status", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the reply and the question it ends on past the event log, and pushes a question", () => {
+    insertRun("r4");
+    const card = { kind: "question", title: "Which card?", actions: [{ label: "Amex", reply: "amex" }] };
+    append("r4", {
+      event: "message.delta",
+      delta: "Two cards on file.\n```hermes-recommend\n" + JSON.stringify(card) + "\n```",
+    });
+    (runManager as unknown as Internals).finishRun("r4", "completed");
+    const row = db
+      .prepare(`SELECT reply_preview, question_json FROM runs WHERE run_id = 'r4'`)
+      .get() as { reply_preview: string; question_json: string };
+    expect(row.reply_preview).toBe("Two cards on file.");
+    expect(JSON.parse(row.question_json)).toMatchObject({ kind: "question", title: "Which card?" });
+    expect(sendToAll).toHaveBeenCalledWith(expect.objectContaining({ kind: "question", body: "Which card?" }));
   });
 
   it("closes long-stranded runs on boot without a notification", () => {

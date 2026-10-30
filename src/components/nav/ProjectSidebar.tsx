@@ -7,7 +7,6 @@ import {
   IconChevronRight,
   IconClock,
   IconEdit,
-  IconHome,
   IconMore,
   IconPin,
   IconPlus,
@@ -263,7 +262,7 @@ export function ProjectSidebar({
   const router = useRouter();
   const { openSearch } = useAppActions();
   const { phase } = useRunStatus();
-  const { byProject, activity } = useActivity();
+  const { byProject } = useActivity();
   // shortcut hint on the Search row, only where there is a keyboard
   const mod = useKeyboardMod();
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -525,25 +524,6 @@ export function ProjectSidebar({
         * arrangement — rather than an icon in the header and a button at the
         * foot. */}
       <div className="flex flex-col gap-px px-2 pb-2">
-        {/* Home carries the same count as the app icon: what is waiting on
-          * you across every project. */}
-        <button
-          type="button"
-          onClick={() => {
-            onClose();
-            router.push("/");
-          }}
-          aria-current={activeProjectId ? undefined : "page"}
-          className={`${sidebarRow} ${activeProjectId ? "" : "bg-hover-2"}`}
-        >
-          <IconHome size={18} className="text-ink-2" />
-          <span className="flex-1">Home</span>
-          {(activity?.badge ?? 0) > 0 && (
-            <span className="min-w-5 rounded-full bg-accent-tint px-1.5 text-center text-meta font-medium text-ink tabular-nums">
-              {activity!.badge}
-            </span>
-          )}
-        </button>
         <button
           type="button"
           onClick={onNewProject}

@@ -10,6 +10,7 @@ import { sendToAll } from "./push";
 import { ensureGeneralChat, migrateScheduledToGeneral } from "./general-chat-setup";
 import { publishChange } from "./api-changes";
 import { markdownToPlainText } from "./markdown";
+import { extractQuestion } from "./recommendation";
 
 /* Scheduled jobs, delivered into a project.
  *
@@ -324,18 +325,23 @@ async function deliver(job: HermesJob, file: string) {
    * per-device question, and Settings → Notifications is where it is asked. */
   // Titled by the job, not the project: every job reports into General, so
   // the project name would read the same on every notification.
+  // A brief that ends on a decision is a question, not news: it is pushed as
+  // one, so it stays on screen and a device that mutes reports still hears it.
+  const question = status === "failed" ? null : extractQuestion(body);
   await sendToAll({
     title: job.name,
     body:
       status === "failed"
         ? "The scheduled run failed."
-        : markdownToPlainText(body).slice(0, 140),
+        : question
+          ? question.title
+          : markdownToPlainText(body).slice(0, 140),
     url: `/p/${general.projectId}/s/${general.sessionId}`,
     // Its own tag, per job: a scheduled result arriving overnight must not
     // silently replace the notification for the run you were watching before
     // bed, nor another job's report from an hour earlier.
     tag: `${APP_SLUG}-job-${job.id}`,
-    kind: status === "failed" ? "job-failed" : "job",
+    kind: status === "failed" ? "job-failed" : question ? "question" : "job",
   });
 }
 

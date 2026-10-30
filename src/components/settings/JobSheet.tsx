@@ -11,6 +11,8 @@ import {
   buttonClass,
 } from "@/components/ui/SettingsControls";
 import type { Job } from "@/hooks/useJobs";
+import { JOB_DECISION_FORMAT } from "@/lib/decision-format";
+import { RECOMMEND_FENCE } from "@/lib/chat-types";
 
 /* Create or edit one Hermes cron job.
  *
@@ -249,6 +251,22 @@ function JobForm({
           placeholder="Summarise today's food log and compare it against the daily targets."
           className={`mt-2.5 ${TEXTAREA_CLASS}`}
         />
+        {/* A job runs without any project's instructions, so a brief only
+          * asks in a shape the app can answer — a card, and a "question"
+          * notification — if its own prompt says to. */}
+        {!prompt.includes(RECOMMEND_FENCE) && (
+          <button
+            type="button"
+            onClick={() =>
+              setPrompt((current) =>
+                current.trim() ? `${current.trimEnd()}\n\n${JOB_DECISION_FORMAT}` : JOB_DECISION_FORMAT,
+              )
+            }
+            className={`-mx-3.5 mt-1.5 ${buttonClass("ghost", "sm")}`}
+          >
+            Let it ask me to decide
+          </button>
+        )}
       </div>
 
       <div>

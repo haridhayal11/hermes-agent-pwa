@@ -1,6 +1,8 @@
 "use client";
 
 import type { Recommendation } from "@/lib/chat-types";
+
+export { parseRecommendation } from "@/lib/recommendation";
 import { Meter } from "@/components/ui/Meter";
 import { IconBulb, IconQuestion } from "@/components/primitives/icons";
 
@@ -20,50 +22,6 @@ import { IconBulb, IconQuestion } from "@/components/primitives/icons";
  * fence is not an error worth surfacing either — parseRecommendation returns
  * null and the caller falls back to an ordinary code block, which is exactly
  * what the text is at that point. */
-
-export function parseRecommendation(raw: string): Recommendation | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const obj = parsed as Record<string, unknown>;
-
-  const title = typeof obj.title === "string" ? obj.title.trim() : "";
-  if (!title) return null;
-
-  const actions = Array.isArray(obj.actions)
-    ? obj.actions.flatMap((item): Recommendation["actions"] => {
-        if (!item || typeof item !== "object") return [];
-        const a = item as Record<string, unknown>;
-        const label = typeof a.label === "string" ? a.label.trim() : "";
-        // `reply` is what gets sent back on press. Falling back to the label
-        // keeps a card usable when the agent only wrote one of the two.
-        const reply = typeof a.reply === "string" && a.reply.trim() ? a.reply.trim() : label;
-        return label ? [{ label, reply }] : [];
-      })
-    : [];
-
-  const confidence = typeof obj.confidence === "number" ? obj.confidence : undefined;
-  // Declared wins; inference is the fallback for a reply written against the
-  // older contract, where the fence only ever meant "recommendation".
-  const kind =
-    obj.kind === "question" || obj.kind === "recommendation"
-      ? obj.kind
-      : confidence === undefined
-        ? "question"
-        : "recommendation";
-
-  return {
-    kind,
-    title,
-    rationale: typeof obj.rationale === "string" ? obj.rationale.trim() : undefined,
-    confidence,
-    actions: actions.slice(0, 4),
-  };
-}
 
 export function RecommendationCard({
   recommendation,

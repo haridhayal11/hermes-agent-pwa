@@ -1,4 +1,4 @@
-import { RECOMMEND_FENCE } from "./chat-types";
+import { DECISION_FORMAT } from "./decision-format";
 
 // A project's persistent framing.
 //
@@ -107,14 +107,7 @@ export function composeInstructions(
    * This is re-sent on every single run, so its length is a standing cost per
    * turn. One example covers both kinds deliberately; a second JSON blob would
    * roughly double the block to say very little. */
-  parts.push(
-    [
-      `When you are recommending a course of action, or need the user to choose between options before you can continue, end your reply with a fenced block tagged \`${RECOMMEND_FENCE}\` containing JSON:`,
-      `\`\`\`${RECOMMEND_FENCE}` +
-        '\n{"kind": "recommendation", "title": "Short recommendation", "rationale": "One or two sentences of why", "confidence": 0.8, "actions": [{"label": "Do it", "reply": "yes, go ahead"}, {"label": "Not now", "reply": "skip that for now"}]}\n```',
-      "The app renders it as a card with one button per action; pressing a button sends that action's `reply` back as the user's next message, and they can always type something else instead. Use `\"kind\": \"question\"` and omit `confidence` when you are asking rather than advising. `confidence` is 0 to 1 and should be your honest estimate. Use at most four actions, and use this only when there is a real choice to make — not on every turn.",
-    ].join("\n\n"),
-  );
+  parts.push(DECISION_FORMAT);
 
   // The one direction Hermes has no API for. /v1/runs can receive images and
   // nothing else, and there is no download endpoint on :8642 — so a file the

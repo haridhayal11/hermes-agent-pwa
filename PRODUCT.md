@@ -45,9 +45,11 @@ dashboard.
   messages sent during a run queue.
 - Hermes cron jobs report into one General chat, as plain messages you can
   reply to; a prompt in any chat can be turned into one ("Repeat this…").
-- Home (`/`) shows what is waiting across every project: approvals, live runs,
-  replies nobody has opened, unread reports. The sidebar carries the same
-  state as dots, and the app icon carries the count.
+- A bell in the header opens the notifications panel: approvals and open
+  questions first, then replies that finished while you were away, failures
+  and scheduled reports. Questions and approvals can be answered from it.
+  The sidebar carries the same state as dots, and the app icon the count.
+  The app opens on a chat — the pinned project, else the latest.
 - Per project: the files the agent handed over, a read-only diff of its
   working directory, an export of the thread, and sessions from the CLI or
   Telegram brought in as chats.
@@ -95,8 +97,9 @@ dashboard.
 
 1. Reading comes first: long agent answers, code and tool output must be easy
    to read; nothing decorative competes with them.
-2. State at a glance: a live run, a pending approval and an unread scheduled
-   report must be visible without hunting.
+2. State at a glance: a live run, a pending approval, an open question and an
+   unread scheduled report must be visible without hunting — the bell, the
+   badge and the sidebar dots.
 3. Light on the phone: no added weight, effects or motion that make the
    installed app slower or jankier on iOS.
 4. Continuity over novelty: the one destructive action (pointing a project at

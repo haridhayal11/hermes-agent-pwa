@@ -264,6 +264,11 @@ function migrate(db: Database.Database) {
   // created here. Deleting or renaming it in this app stays local: the
   // transcript is the user's, and it predates this app knowing about it.
   addColumn(db, "project_sessions", "imported", "INTEGER NOT NULL DEFAULT 0");
+  // What a finished run said and whether it ended on a question, written at
+  // finish. The notifications panel lists runs for two weeks, and run_events
+  // — the only other place the reply lives here — is pruned after a day.
+  addColumn(db, "runs", "reply_preview", "TEXT");
+  addColumn(db, "runs", "question_json", "TEXT");
   addColumn(db, "queued_messages", "session_id", "TEXT");
   db.exec(`CREATE INDEX IF NOT EXISTS idx_queued_session
     ON queued_messages(project_id, session_id, created_at)`);

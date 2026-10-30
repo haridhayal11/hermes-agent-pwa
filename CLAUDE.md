@@ -109,10 +109,12 @@ Never make the browser talk to `:8642` directly.
 | `src/lib/preferences.ts` | Per-device display prefs and their `localStorage` shape. |
 | `src/lib/push.ts` | Web Push / VAPID. The only place the private key is read. |
 | `src/lib/uploads.ts` | Where attachments land, and the download allowlist. |
-| `src/lib/activity.ts` | What is happening across every project — approvals, live runs, unseen replies, unread reports — for Home, the sidebar's dots and the app badge. Database only, so `push.ts` can count the badge. |
+| `src/lib/activity.ts` | The notifications feed (approvals, open questions, unseen replies, failures, reports), the sidebar's per-chat dots and the app badge — all derived, nothing stored. Database only, so `push.ts` can count the badge. |
 | `src/lib/run-text.ts` | Reads over a run's event log (reply text, preview, pending approval command). Database only; shared by run-manager, activity and push. |
 | `src/components/ActivityContext.tsx` | The activity snapshot on the client. Mounted in the root layout so it survives navigation; sets the app badge. |
-| `src/components/home/HomeView.tsx` | `/`: Needs you, Running, New replies, Scheduled, Projects. |
+| `src/components/nav/NotificationsPanel.tsx` | The header bell's panel: full screen on a phone, a popover from `sm`. Answers questions and approvals in place. |
+| `src/lib/recommendation.ts` | The `hermes-recommend` card contract, parsed — pure, so the server can read questions too (`RecommendationCard.tsx` is `"use client"`). |
+| `src/lib/decision-format.ts` | The text that teaches the agent that contract: per-run instructions, and the variant a scheduled job's prompt carries. |
 | `src/lib/shell-data.ts` | The projects + sessions every AppShell page renders the sidebar from. |
 | `src/lib/project-files.ts` | The Files panel's listing: the outbox and the upload folders, never the whole cwd. |
 | `src/lib/git-changes.ts` | "What changed": a hardened, read-only `git status`/`git diff` of the project's cwd. |
@@ -269,7 +271,8 @@ bought nothing and cost that. Bottom-anchored overlays (`SearchOverlay`,
 to Home Screen ignores the manifest's `start_url` — so the icon ends up bolted
 to whichever project was open when it was installed (nearly always one, back
 when `/` redirected into the most recent project), and 404s if that project is
-later deleted. `/` is Home now, which is what the correction lands on. `LaunchNormalizer` corrects it on
+later deleted. `/` redirects into the pinned project, else the most recently
+active one — so pinning General makes the app open there. `LaunchNormalizer` corrects it on
 the way in: a *cold launch* of the installed app (session-storage marker,
 `navigate` navigation type, `display-mode: standalone`) is replaced with `/`.
 
@@ -321,8 +324,9 @@ event a beat before `finishRun` settles the row, so `finishRun` keeps an
 existing `seen_at`). An attached stream does not count: iOS keeps it open
 behind the lock screen. Cancelled runs are seen by definition.
 
-`activity.ts` reads all of that into Home, the sidebar's dots and the badge
-(approvals + unseen + unread General reports; a busy chat doesn't count). The
+`activity.ts` reads all of that into the notifications panel, the sidebar's
+dots and the badge (everything unread in the panel, approvals included; a busy
+chat doesn't count). The
 badge travels in every push (`payload.badge`, counted at send time, after the
 run's state is written) so `sw.js` can set it while the app is closed. Run
 transitions go to the browser as `run.changed` on an **ephemeral** channel
@@ -339,6 +343,28 @@ An approval push links `?approval=<run id>`. The thread focuses the card and
 drops the parameter with `history.replaceState` (a `router.replace` re-renders
 the server page and refetches the transcript), or says the approval was
 already answered when activity shows that run isn't waiting.
+
+**Notifications are derived, never stored.** The header bell's panel is
+built on every read from `runs` and `cron_deliveries`, so "read" has one
+meaning — the chat was opened (`seen_at`, `read_at`) — and "Mark all read"
+just stamps both. It lists, over 14 days: approvals (until answered),
+open questions (held at the top), runs that finished while you weren't
+looking (`seen_at` null or more than 10s after `ended_at` — a watched run is
+stamped at its terminal event), failures, and every report. A question is
+open only while nothing has happened in its chat since: a later run start or
+a later report closes it, the same rule the thread uses to pin it. Because
+`run_events` is pruned after a day, `finishRun` writes `reply_preview` and
+`question_json` onto the run row.
+
+Decisions reach the panel through the existing `hermes-recommend` card, not
+by parsing prose. Project runs learn the format from their instructions; a
+scheduled job runs without any, so its prompt has to carry it
+(`JOB_DECISION_FORMAT`, the "Let it ask me to decide" button in the job
+sheet). A report ending on a question pushes as kind `question`, renders an
+answerable card in General, and answers from the panel post into that chat.
+This replaced a Home dashboard of per-project state, which suited many
+projects; the usage it was built for turned out to be one conversation with
+briefs arriving into it.
 
 **A dropped upstream stream cannot be resumed, only polled.** `attach()` tries
 one re-attach and then falls back to polling `GET /v1/runs/{id}` until the run

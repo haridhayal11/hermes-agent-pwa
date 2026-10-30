@@ -57,9 +57,15 @@ export function replyPreview(runId: string): string {
   return markdownToPlainText(runText(runId)).slice(0, 140);
 }
 
-/** The command an outstanding approval is asking about, from its request. */
-export function pendingApprovalCommand(runId: string): string | null {
-  let command: string | null = null;
+export interface PendingApprovalSummary {
+  command: string | null;
+  /** what the gateway will accept for this one — `choices` on the event */
+  choices: string[];
+}
+
+/** The approval a run is blocked on, from its request — null once answered. */
+export function pendingApproval(runId: string): PendingApprovalSummary | null {
+  let pending: PendingApprovalSummary | null = null;
   for (const event of runEvents(runId)) {
     if (event.event === "approval.request") {
       const raw =
@@ -68,10 +74,20 @@ export function pendingApprovalCommand(runId: string): string | null {
           : typeof event.description === "string"
             ? event.description
             : "";
-      command = raw.trim() || null;
+      pending = {
+        command: raw.trim() || null,
+        choices: Array.isArray(event.choices)
+          ? event.choices.filter((choice): choice is string => typeof choice === "string")
+          : [],
+      };
     } else if (event.event === "approval.responded") {
-      command = null;
+      pending = null;
     }
   }
-  return command;
+  return pending;
+}
+
+/** The command an outstanding approval is asking about, from its request. */
+export function pendingApprovalCommand(runId: string): string | null {
+  return pendingApproval(runId)?.command ?? null;
 }

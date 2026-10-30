@@ -102,6 +102,12 @@ describe("Scheduled inbox migration", () => {
     ).toEqual({ count: 0 });
   });
 
+  it("adds the columns a finished run keeps for the notifications panel", () => {
+    expect(
+      migrated.prepare(`SELECT reply_preview, question_json FROM runs WHERE run_id = 'old-run'`).get(),
+    ).toEqual({ reply_preview: null, question_json: null });
+  });
+
   it("treats every run from before seen tracking as already seen", () => {
     expect(
       migrated.prepare(`SELECT run_id, seen_at FROM runs ORDER BY run_id`).all(),

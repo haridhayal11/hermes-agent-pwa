@@ -7,7 +7,6 @@ import {
   IconDiff,
   IconEdit,
   IconFolder,
-  IconHome,
   IconImport,
   IconKeyboard,
   IconMore,
@@ -55,16 +54,6 @@ export function HeaderMenu({
       <Menu label="Menu" align="end" triggerSize="lg" trigger={<IconMore size={20} />}>
         {(close) => (
           <>
-            {project && (
-              <MenuItem
-                icon={<IconHome size={16} />}
-                label="Home"
-                onSelect={() => {
-                  close();
-                  router.push("/");
-                }}
-              />
-            )}
             {project && (
               <MenuItem
                 icon={<IconEdit size={16} />}

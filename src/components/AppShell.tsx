@@ -6,6 +6,7 @@ import { NewProjectDialog } from "@/components/nav/NewProjectDialog";
 import { NewChatDialog } from "@/components/nav/NewChatDialog";
 import { ProjectSidebar } from "@/components/nav/ProjectSidebar";
 import { HeaderMenu } from "@/components/nav/HeaderMenu";
+import { NotificationsButton } from "@/components/nav/NotificationsButton";
 import { SearchOverlay } from "@/components/nav/SearchOverlay";
 import { ShortcutsSheet } from "@/components/nav/ShortcutsSheet";
 import { FilesSheet } from "@/components/nav/FilesSheet";
@@ -233,6 +234,7 @@ export function AppShell({
                 </div>
 
                 <div className="flex items-center">
+                  <NotificationsButton />
                   <HeaderMenu
                     project={activeProject}
                     activeSessionId={activeSessionId}

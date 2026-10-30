@@ -12,17 +12,20 @@ export type DotState = ActivityState | "stopping";
 
 const LABELS: Record<DotState, string> = {
   approval: "Waiting for approval",
+  question: "Waiting on your answer",
   running: "Running",
   stopping: "Stopping",
   unseen: "New reply",
   failed: "Run failed",
 };
 
-/* Hue is a signal (DESIGN.md): orange when the run needs you, red when it
- * failed. A live run is a neutral pulse, and a reply nobody has opened is the
+/* Hue is a signal (DESIGN.md): orange when the run needs you — a pulse for
+ * an approval holding a live run, steady for a question it ended on — red
+ * when it failed. A live run is a neutral pulse, and a reply nobody has opened is the
  * same hue-free accent dot as an unread report. */
 const COLOURS: Record<DotState, string> = {
   approval: "var(--orange)",
+  question: "var(--orange)",
   running: "var(--ink-2)",
   stopping: "var(--ink-2)",
   unseen: "var(--accent)",
