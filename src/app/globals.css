@@ -12,12 +12,12 @@
  *
  * The values are the category standard, played straight: a
  * hue-free grey ramp in the arrangement every chat client uses.
- * The page is a mid-dark grey, the sidebar one step *darker*,
+ * The page is a near-black grey, the sidebar one step *darker*,
  * and everything raised (composer, your own messages, menus,
  * cards) one step lighter — so depth reads from value alone and
  * almost nothing needs an outline.
  *
- *   dark   sidebar #181818 · page #212121 · raised #303030
+ *   dark   sidebar #0b0b0b · page #141414 · raised #252525
  *   light  sidebar #f9f9f9 · page #ffffff · bubble #f4f4f4
  *
  * Hue appears only where it means something: green for done,
@@ -72,21 +72,21 @@
 
 /* The default. */
 .dark {
-  --page: #212121;
-  --canvas: #181818;
-  --surface: #303030;
-  --inset: #1b1b1b;
-  --bubble: #303030;
+  --page: #141414;
+  --canvas: #0b0b0b;
+  --surface: #252525;
+  --inset: #0f0f0f;
+  --bubble: #252525;
   --hover: oklch(100% 0 0 / 0.06);
   --hover-2: oklch(100% 0 0 / 0.1);
   --ink: #ececec;
   --ink-2: #b4b4b4;
-  --ink-3: #9b9b9b; /* 4.6:1 on the raised #303030, so placeholders pass */
+  --ink-3: #9b9b9b; /* 5.7:1 on the raised #252525, so placeholders pass */
   --line: oklch(100% 0 0 / 0.1);
   --line-strong: oklch(100% 0 0 / 0.16);
-  --field: #3c3c3c;
+  --field: #323232;
   --stripe: oklch(100% 0 0 / 0.05);
-  --stripe-bg: #1b1b1b;
+  --stripe-bg: #0f0f0f;
   --accent: #ececec;
   --accent-ink: #ececec;
   --accent-tint: oklch(100% 0 0 / 0.1);

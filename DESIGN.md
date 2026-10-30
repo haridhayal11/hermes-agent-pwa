@@ -3,11 +3,11 @@ name: Hermes PWA
 description: A familiar chat client played straight — one calm reading column, a darker sidebar of projects, a pill composer, hue-free greys with hue only for states.
 colors:
   # Dark is the default theme. Surfaces separate by value: sidebar < page < raised.
-  dark-page: "#212121"
-  dark-sidebar: "#181818"
-  dark-raised: "#303030"
-  dark-inset: "#1b1b1b"
-  dark-field: "#3c3c3c"
+  dark-page: "#141414"
+  dark-sidebar: "#0b0b0b"
+  dark-raised: "#252525"
+  dark-inset: "#0f0f0f"
+  dark-field: "#323232"
   dark-ink: "#ececec"
   dark-ink-2: "#b4b4b4"
   dark-ink-3: "#9b9b9b"
@@ -266,7 +266,7 @@ The palette is hue-free grey; the faces are the platform's own (SF Pro and SF Mo
 
 **Key Characteristics:**
 - One reading column, 768px max, centred; the sidebar is a permanent 272px column from `lg`, a drawer below.
-- Surfaces separate by value, not outline: sidebar #181818 < page #212121 < raised #303030 in dark.
+- Surfaces separate by value, not outline: sidebar #0b0b0b < page #141414 < raised #252525 in dark.
 - Ink is the accent. Primary actions are ink-on-page pills; there is no brand hue.
 - Hue only as signal: orange for waiting on you, red for failure and danger. Completed states are neutral.
 - Pill and circle controls (full radius) for actions; 10px rounded rectangles for rows and fields; 28px composer, 22px bubbles.
@@ -287,19 +287,19 @@ A hue-free grey ladder in two mirrored themes, with three signal hues held in re
 - **Affirmative Green** (`dark-green` oklch(72% 0.15 152) / `light-green` oklch(56% 0.14 152)): a reserved token for explicit confirmation only (the "Copied" tick, Hermes "reachable", the Allow glyph). It is not the colour of a finished run or tool; see Named Rules.
 
 ### Neutral
-- **Page** (`dark-page` #212121 / `light-page` #ffffff): the thread, header and settings ground. Also the `themeColor` and pre-paint colour.
-- **Sidebar** (`dark-sidebar` #181818 / `light-sidebar` #f9f9f9): one step darker than the page in dark; drawer panel. Token name in code is `canvas`.
-- **Raised** (`dark-raised` #303030 / `light-raised` #ffffff): composer, cards, popovers, dialogs, toast. `light-bubble` #f4f4f4 is the light user bubble; in dark the bubble is the raised grey.
-- **Inset** (`dark-inset` #1b1b1b / `light-inset` #f9f9f9): code blocks and wells inside a card.
-- **Field** (`dark-field` #3c3c3c / `light-field` #f0f0f0): chips, segmented tracks, inline code, the disabled send circle.
-- **Ink ramp** (`ink` #ececec / `ink-2` #b4b4b4 / `ink-3` #9b9b9b in dark; #0d0d0d / #5d5d5d / #737373 in light): primary text, secondary text and icons, placeholders and metadata. `ink-3` is held at 4.6:1 on raised dark and 4.7:1 on white so placeholders pass.
+- **Page** (`dark-page` #141414 / `light-page` #ffffff): the thread, header and settings ground. Also the `themeColor` and pre-paint colour.
+- **Sidebar** (`dark-sidebar` #0b0b0b / `light-sidebar` #f9f9f9): one step darker than the page in dark; drawer panel. Token name in code is `canvas`.
+- **Raised** (`dark-raised` #252525 / `light-raised` #ffffff): composer, cards, popovers, dialogs, toast. `light-bubble` #f4f4f4 is the light user bubble; in dark the bubble is the raised grey.
+- **Inset** (`dark-inset` #0f0f0f / `light-inset` #f9f9f9): code blocks and wells inside a card.
+- **Field** (`dark-field` #323232 / `light-field` #f0f0f0): chips, segmented tracks, inline code, the disabled send circle.
+- **Ink ramp** (`ink` #ececec / `ink-2` #b4b4b4 / `ink-3` #9b9b9b in dark; #0d0d0d / #5d5d5d / #737373 in light): primary text, secondary text and icons, placeholders and metadata. `ink-3` is held at 5.7:1 on raised dark and 4.7:1 on white so placeholders pass.
 - **Hairlines and hovers** (white at 10% / 16% in dark, black at 10% / 16% in light for `line` / `line-strong`; hover 6% and 10% dark, 4.5% and 8% light): row dividers, input rings, hover and active-row washes.
 - **Scrim** (black at 55% dark, 36% light): behind dialogs, sheets and the drawer.
 
 ### Named Rules
 **The Hue-Is-A-Signal Rule.** Hue means the run needs you (orange) or something failed (red). A running run is shown by a neutral `ink-2` pulsing dot, and a completed tool call is a quiet `ink-3` check. Completed, on, and ordinary-success states are neutral; do not tint them.
 
-**The Value-Not-Outline Rule.** In dark, separation comes from the step between #181818, #212121 and #303030. A raised surface gets at most a 6 to 8% white ring, never a visible border.
+**The Value-Not-Outline Rule.** In dark, separation comes from the step between #0b0b0b, #141414 and #252525. A raised surface gets at most a 6 to 8% white ring, never a visible border.
 
 **The Ink-Is-The-Accent Rule.** The primary action is `ink` on `page` (near-white pill in dark, near-black in light). Do not introduce a brand colour for buttons, links or selection.
 
@@ -466,7 +466,7 @@ Short ease-out fades and small rises; panels slide; nothing bounces. Durations a
 ## Do's and Don'ts
 
 ### Do:
-- **Do** separate dark surfaces by value: #181818 sidebar, #212121 page, #303030 raised, and keep the ring on raised surfaces at 6 to 8% white.
+- **Do** separate dark surfaces by value: #0b0b0b sidebar, #141414 page, #252525 raised, and keep the ring on raised surfaces at 6 to 8% white.
 - **Do** keep hue for states that ask something of the reader: `orange` for waiting, `red` for failure and destructive actions. Show running with the neutral pulsing dot.
 - **Do** make the primary action an ink-on-page pill and every other action a ghost or ring-secondary pill.
 - **Do** use the type tokens (`text-meta`, `text-label`, `text-ui`, `text-body`, `text-input`, `text-title`) and never an arbitrary pixel size, so the text-size preference moves everything together.

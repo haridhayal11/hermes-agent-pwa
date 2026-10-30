@@ -18,7 +18,7 @@ Unresolved: none.
 
 THESIS: A familiar chat client at the ChatGPT app's craft: one calm reading column, a darker sidebar of projects, a pill composer. It keeps the category arrangement and refuses the incumbent's unfinished version of it: 12-13px chrome, a web font on a flat grey ramp, a cramped thread.
 
-OWN-WORLD: Hue-free greys. Dark: page #212121, sidebar #181818, raised #303030 for user bubbles, composer and popovers; ink #ececec / #afafaf / #8f8f8f; hairlines white at 10%. Light mirrors on white, #f9f9f9 sidebar, #f4f4f4 bubbles. System UI face (SF Pro on Apple), system mono for code. Hue only for running, approval and failure. Radii: 28 composer, 24 bubbles, 16 popovers and cards, 10 rows.
+OWN-WORLD: Hue-free greys. Dark: page #141414, sidebar #0b0b0b, raised #252525 for user bubbles, composer and popovers; ink #ececec / #afafaf / #8f8f8f; hairlines white at 10%. Light mirrors on white, #f9f9f9 sidebar, #f4f4f4 bubbles. System UI face (SF Pro on Apple), system mono for code. Hue only for running, approval and failure. Radii: 28 composer, 24 bubbles, 16 popovers and cards, 10 rows.
 
 STORY: Open the app into the last project, read the reply, type the next instruction; see a live run or a pending approval at a glance and act on it.
 

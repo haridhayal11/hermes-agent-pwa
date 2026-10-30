@@ -15,8 +15,8 @@ export default function manifest(): MetadataRoute.Manifest {
     id: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#212121",
-    theme_color: "#212121",
+    background_color: "#141414",
+    theme_color: "#141414",
     // A dark shell behind a white flash on every cold start is the thing that
     // makes an installed PWA feel like a browser. Matching all three — the
     // manifest background, the theme colour and the body — removes it.

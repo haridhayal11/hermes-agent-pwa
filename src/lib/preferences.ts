@@ -145,5 +145,5 @@ export function applyPrefsToDocument(prefs: Preferences) {
   // In standalone the status bar is tinted from this, and layout.tsx can only
   // declare one value at build time. Follow the live theme instead.
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", dark ? "#212121" : "#ffffff");
+  if (meta) meta.setAttribute("content", dark ? "#141414" : "#ffffff");
 }

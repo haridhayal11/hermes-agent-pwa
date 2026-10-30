@@ -117,7 +117,7 @@ setTimeout(set,1000);
 // themeColor lives here, not in metadata — it's deprecated there in Next 16.
 export const viewport: Viewport = {
   // = the dark --page token. applyPrefsToDocument() keeps it in step after.
-  themeColor: "#212121",
+  themeColor: "#141414",
   // The pre-paint default. applyPrefsToDocument() overrides it with an inline
   // style once a theme is chosen; this is what stops rubber-banding exposing a
   // white strip before that happens.
